@@ -37,6 +37,9 @@ dependencies:
   # Wakelock
   wakelock_plus: ^1.3.1
 
+  # Path Provider (for crash logs)
+  path_provider: ^2.1.1
+
   # Icons
   cupertino_icons: ^1.0.8
 
