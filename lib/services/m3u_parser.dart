@@ -16,8 +16,18 @@ class M3uParser {
     'MOVIES',
   ];
 
+  /// Parse M3U content into a list of Channel objects (synchronous).
+  /// This method is kept for compatibility but for large M3U files you should
+  /// call [parseToMap] inside a compute isolate and then convert to Channel.
   static List<Channel> parse(String content) {
-    final List<Channel> channels = [];
+    final maps = parseToMap(content);
+    return maps.map((m) => Channel.fromM3uEntry(m)).toList();
+  }
+
+  /// Parse M3U content into a list of simple Maps. This function is
+  /// suitable for running inside a background isolate via compute().
+  static List<Map<String, String>> parseToMap(String content) {
+    final List<Map<String, String>> channels = [];
     final lines = content.split('\n');
 
     String? currentExtInf;
@@ -27,15 +37,15 @@ class M3uParser {
 
       if (line.startsWith('#EXTINF:')) {
         currentExtInf = line;
-      } else if (line.isNotEmpty &&
-          !line.startsWith('#') &&
-          currentExtInf != null) {
+      } else if (line.isNotEmpty && !line.startsWith('#') && currentExtInf != null) {
         final entry = _parseExtInf(currentExtInf, line);
-        final channel = Channel.fromM3uEntry(entry);
 
-        if (_isLiveTv(channel.groupTitle)) {
-          channels.add(channel);
+        // Decide whether to include (live TV) before adding
+        final group = (entry['group-title'] ?? 'Geral').toUpperCase();
+        if (_isLiveTv(group)) {
+          channels.add(entry);
         }
+
         currentExtInf = null;
       }
     }
@@ -68,6 +78,11 @@ class M3uParser {
         result['tvg-name'] = result['name']!;
       }
     }
+
+    // Normalize keys used by Channel.fromM3uEntry
+    result['group-title'] = result['group-title'] ?? result['group_title'] ?? 'Geral';
+    result['tvg-logo'] = result['tvg-logo'] ?? result['tvg_logo'] ?? '';
+    result['tvg-id'] = result['tvg-id'] ?? result['tvg_id'] ?? '';
 
     return result;
   }
