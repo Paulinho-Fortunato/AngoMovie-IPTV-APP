@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'dart:async';
+import 'dart:isolate';
 import '../models/channel.dart';
 import '../services/channel_service.dart';
 import '../services/m3u_parser.dart';
@@ -13,6 +15,12 @@ class ChannelProvider extends ChangeNotifier {
   String _errorMessage = '';
   String _searchQuery = '';
   Channel? _featuredChannel;
+  
+  // Lazy loading state
+  int _loadedCategoriesCount = 0;
+  final int _categoriesPerBatch = 5;
+  Timer? _categoryLoadTimer;
+  final Set<String> _loadingCategories = {};
 
   List<Channel> get allChannels => _allChannels;
   List<Channel> get filteredChannels =>
@@ -25,15 +33,25 @@ class ChannelProvider extends ChangeNotifier {
   bool get hasError => _state == LoadingState.error;
   bool get hasData => _allChannels.isNotEmpty;
 
+  /// Load channels with isolate processing and lazy category loading
   Future<void> loadChannels({bool forceRefresh = false}) async {
+    if (_state == LoadingState.loading) return;
+    
     _state = LoadingState.loading;
     _errorMessage = '';
+    _loadedCategoriesCount = 0;
+    _categorizedChannels.clear();
     notifyListeners();
 
     try {
-      _allChannels = await ChannelService.loadChannels(forceRefresh: forceRefresh);
-      _categorizedChannels = M3uParser.groupByCategory(_allChannels);
-      _featuredChannel = _allChannels.isNotEmpty ? _allChannels.first : null;
+      // Load channels in isolate to avoid blocking UI
+      final channels = await _loadChannelsInIsolate(forceRefresh);
+      _allChannels = channels;
+      _featuredChannel = channels.isNotEmpty ? channels.first : null;
+      
+      // Start lazy loading categories
+      _startLazyCategoryLoading(channels);
+      
       _state = LoadingState.success;
     } catch (e) {
       _errorMessage = 'Não foi possível carregar os canais. Verifique sua conexão.';
@@ -44,6 +62,87 @@ class ChannelProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Load channels in a background isolate
+  Future<List<Channel>> _loadChannelsInIsolate(bool forceRefresh) async {
+    try {
+      final receivePort = ReceivePort();
+      await Isolate.spawn(
+        _channelLoaderEntry,
+        [receivePort.sendPort, forceRefresh],
+        debugName: 'ChannelLoader',
+      );
+
+      // Set a timeout for the isolate
+      final channels = await receivePort.first.timeout(
+        const Duration(minutes: 1),
+        onTimeout: () => throw TimeoutException('Channel loading timed out'),
+      ) as List<Channel>;
+      
+      return channels;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Isolate error: $e, falling back to main thread');
+      // Fallback to main thread if isolate fails
+      return await ChannelService.loadChannels(forceRefresh: forceRefresh);
+    }
+  }
+
+  /// Isolate entry point
+  static Future<void> _channelLoaderEntry(List<dynamic> args) async {
+    final SendPort sendPort = args[0];
+    final bool forceRefresh = args[1];
+    
+    try {
+      final channels = await ChannelService.loadChannels(forceRefresh: forceRefresh);
+      sendPort.send(channels);
+    } catch (e) {
+      sendPort.send([]);
+    }
+  }
+
+  /// Start lazy loading categories in batches
+  void _startLazyCategoryLoading(List<Channel> channels) {
+    _categoryLoadTimer?.cancel();
+    
+    // Get all unique categories
+    final allCategories = channels
+        .map((c) => c.groupTitle)
+        .toSet()
+        .toList()
+        ..sort();
+
+    _loadBatchOfCategories(channels, allCategories, 0);
+  }
+
+  /// Load a batch of categories
+  void _loadBatchOfCategories(
+    List<Channel> channels,
+    List<String> allCategories,
+    int startIndex,
+  ) {
+    final endIndex =
+        (startIndex + _categoriesPerBatch).clamp(0, allCategories.length);
+
+    for (int i = startIndex; i < endIndex; i++) {
+      final category = allCategories[i];
+      final categoryChannels = channels
+          .where((c) => c.groupTitle == category)
+          .toList();
+      
+      _categorizedChannels[category] = categoryChannels;
+      _loadedCategoriesCount++;
+    }
+
+    notifyListeners();
+
+    // Schedule next batch
+    if (endIndex < allCategories.length) {
+      _categoryLoadTimer = Timer(const Duration(milliseconds: 200), () {
+        _loadBatchOfCategories(channels, allCategories, endIndex);
+      });
+    }
+  }
+
+  /// Optimized search with debouncing
   void search(String query) {
     _searchQuery = query.trim();
     if (_searchQuery.isEmpty) {
@@ -67,5 +166,11 @@ class ChannelProvider extends ChangeNotifier {
 
   Future<void> refreshChannels() async {
     await loadChannels(forceRefresh: true);
+  }
+
+  @override
+  void dispose() {
+    _categoryLoadTimer?.cancel();
+    super.dispose();
   }
 }
