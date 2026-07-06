@@ -10,7 +10,7 @@ import 'm3u_parser.dart';
 class ChannelService {
   // Default M3U source URL - updated to use the raw primary list provided by the user
   static const String _defaultM3uUrl =
-      'https://raw.githubusercontent.com/Paulinho-Fortunato/Minha-lista-IPTV/refs/heads/main/M3U_Unida_Organizada..m3u';
+      'https://raw.githubusercontent.com/Paulinho-Fortunato/Segundalista/refs/heads/main/z.m3u';
   static const String _m3uPrefKey = 'm3u_url';
 
   static const String _lastFetchKey = 'last_fetch_time';
@@ -122,10 +122,26 @@ class ChannelService {
             try {
               final nestedResp = await http.get(Uri.parse(finalUrl)).timeout(const Duration(seconds: 20));
               if (nestedResp.statusCode == 200 && nestedResp.body.isNotEmpty) {
-                // parse nested playlist
-                final nested = M3uParser.parseToMap(nestedResp.body);
-                if (nested.isNotEmpty && nested.first['url'] != null && nested.first['url']!.isNotEmpty) {
-                  finalUrl = nested.first['url']!;
+                final nestedBody = nestedResp.body;
+
+                // If nested playlist is a master (EXT-X-STREAM-INF), parse variants and prefer one with audio codecs
+                if (nestedBody.contains('#EXT-X-STREAM-INF')) {
+                  final selected = _selectVariantWithAudio(nestedBody, baseUrl: finalUrl);
+                  if (selected != null) {
+                    finalUrl = selected;
+                  } else {
+                    // fallback: parse first entry url from nested
+                    final nested = M3uParser.parseToMap(nestedBody);
+                    if (nested.isNotEmpty && nested.first['url'] != null && nested.first['url']!.isNotEmpty) {
+                      finalUrl = _resolveUrl(finalUrl, nested.first['url']!);
+                    }
+                  }
+                } else {
+                  // Not a master playlist; parse as media playlist and take first media URL if present
+                  final nested = M3uParser.parseToMap(nestedBody);
+                  if (nested.isNotEmpty && nested.first['url'] != null && nested.first['url']!.isNotEmpty) {
+                    finalUrl = _resolveUrl(finalUrl, nested.first['url']!);
+                  }
                 }
               }
             } catch (e) {
@@ -178,6 +194,66 @@ class ChannelService {
 
       // No cache and no connection - throw error
       rethrow;
+    }
+  }
+
+  /// Selects a variant URL from a master playlist body that likely contains audio.
+  /// Prefers variants whose CODECS includes an audio codec (mp4a, aac) or that
+  /// explicitly include an AUDIO group. Returns resolved absolute URL or null.
+  static String? _selectVariantWithAudio(String masterBody, {required String baseUrl}) {
+    final lines = masterBody.replaceAll('\r', '').split('\n');
+    final variants = <Map<String, String>>[]; // each item: {attrs:..., url:...}
+
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.startsWith('#EXT-X-STREAM-INF:')) {
+        final attrsLine = line.substring('#EXT-X-STREAM-INF:'.length);
+        String url = '';
+        // next non-empty, non-comment line is the URL
+        for (int j = i + 1; j < lines.length; j++) {
+          final candidate = lines[j].trim();
+          if (candidate.isEmpty) continue;
+          if (candidate.startsWith('#')) continue;
+          url = candidate;
+          break;
+        }
+        if (url.isNotEmpty) {
+          variants.add({'attrs': attrsLine, 'url': url});
+        }
+      }
+    }
+
+    if (variants.isEmpty) return null;
+
+    // try to find variant with audio codec in CODECS or with AUDIO attribute
+    for (final v in variants) {
+      final attrs = v['attrs'] ?? '';
+      final codecsMatch = RegExp(r'CODECS=\"?([^\",]+)\"?', caseSensitive: false).firstMatch(attrs);
+      if (codecsMatch != null) {
+        final codecs = codecsMatch.group(1) ?? '';
+        final lower = codecs.toLowerCase();
+        if (lower.contains('mp4a') || lower.contains('aac') || lower.contains('ac-3') || lower.contains('ec-3')) {
+          return _resolveUrl(baseUrl, v['url']!);
+        }
+      }
+      final audioMatch = RegExp(r'AUDIO=([^,]+)', caseSensitive: false).firstMatch(attrs);
+      if (audioMatch != null) {
+        return _resolveUrl(baseUrl, v['url']!);
+      }
+    }
+
+    // fallback: return first variant resolved
+    return _resolveUrl(baseUrl, variants.first['url']!);
+  }
+
+  /// Resolve possibly relative variantUrl against base playlist URL
+  static String _resolveUrl(String basePlaylistUrl, String variantUrl) {
+    try {
+      final base = Uri.parse(basePlaylistUrl);
+      final resolved = base.resolve(variantUrl).toString();
+      return resolved;
+    } catch (_) {
+      return variantUrl;
     }
   }
 
