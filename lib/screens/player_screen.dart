@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/channel.dart';
 import '../utils/app_colors.dart';
+import '../services/channel_service.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Channel channel;
@@ -51,11 +52,32 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     try {
       final uri = Uri.parse(widget.channel.streamUrl);
+
+      // --- READ SAVED METADATA (e.g. vlc-http-user-agent / vlc-http-referrer / vlc-http-origin)
+      final meta = await ChannelService.getChannelMeta(widget.channel.id);
+      final headers = <String, String>{};
+
+      // Default UA (app)
+      headers['User-Agent'] = 'AngoMovie/1.2.0 Android';
+
+      // Apply vlc opts if present
+      if (meta.containsKey('vlc-http-user-agent')) {
+        headers['User-Agent'] = meta['vlc-http-user-agent']!;
+      }
+      if (meta.containsKey('vlc-http-referrer')) {
+        headers['Referer'] = meta['vlc-http-referrer']!;
+      }
+      if (meta.containsKey('vlc-http-origin')) {
+        headers['Origin'] = meta['vlc-http-origin']!;
+      }
+
+      if (kDebugMode) {
+        debugPrint('🎯 Player headers for ${widget.channel.name}: $headers');
+      }
+
       _controller = VideoPlayerController.networkUrl(
         uri,
-        httpHeaders: {
-          'User-Agent': 'AngoMovie/1.2.0 Android',
-        },
+        httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(
           mixWithOthers: false,
           allowBackgroundPlayback: false,
@@ -69,7 +91,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         await _controller!.play();
         _controller!.addListener(_onPlayerStateChanged);
       }
-    } catch (e) {
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('❌ Player init error: $e\n$st');
       if (mounted) {
         setState(() {
           _hasError = true;
