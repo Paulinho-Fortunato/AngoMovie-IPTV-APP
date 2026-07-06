@@ -16,12 +16,15 @@ class ChannelService {
   static const String _lastFetchKey = 'last_fetch_time';
 
   static Box<Channel>? _channelBox;
+  static Box<dynamic>? _metaBox;
 
   static Future<void> initHive() async {
     if (!Hive.isAdapterRegistered(0)) {
       Hive.registerAdapter(ChannelAdapter());
     }
     _channelBox = await Hive.openBox<Channel>('channels');
+    // Separate box to store per-channel metadata (vlc opts, headers, etc.)
+    _metaBox = await Hive.openBox('channel_meta');
   }
 
   /// Returns the configured M3U URL or the default if not set
@@ -40,6 +43,25 @@ class ChannelService {
       await prefs.setString(_m3uPrefKey, url.trim());
       if (kDebugMode) debugPrint('🔧 M3U URL set to: $url');
     }
+  }
+
+  /// Get per-channel metadata (vlc opts / headers)
+  static Future<Map<String, String>> getChannelMeta(String channelId) async {
+    final box = _metaBox ?? await Hive.openBox('channel_meta');
+    final raw = box.get(channelId);
+    if (raw == null) return {};
+    try {
+      return Map<String, String>.from(raw as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Set per-channel metadata (vlc opts / headers)
+  static Future<void> setChannelMeta(String channelId, Map<String, String> meta) async {
+    final box = _metaBox ?? await Hive.openBox('channel_meta');
+    await box.put(channelId, meta);
+    if (kDebugMode) debugPrint('🔧 Saved metadata for channel $channelId');
   }
 
   /// Load channels from local cache or fetch from remote
@@ -86,18 +108,63 @@ class ChannelService {
           throw Exception('M3U content is empty');
         }
 
-        // Parse M3U in a separate isolate (parsing is CPU-bound and pure Dart)
-        final channels = await _parseM3uInIsolate(m3uContent);
+        // Parse entries to map first (so we keep vlc opts available)
+        final entries = M3uParser.parseToMap(m3uContent);
+        final List<Channel> channels = [];
+
+        for (final entry in entries) {
+          // create initial channel from entry
+          final ch = Channel.fromM3uEntry(entry);
+          String finalUrl = ch.streamUrl;
+
+          // If the URL points to another playlist (.m3u8/.m3u), try to fetch it and extract a real stream
+          if (finalUrl.toLowerCase().endsWith('.m3u8') || finalUrl.toLowerCase().endsWith('.m3u')) {
+            try {
+              final nestedResp = await http.get(Uri.parse(finalUrl)).timeout(const Duration(seconds: 20));
+              if (nestedResp.statusCode == 200 && nestedResp.body.isNotEmpty) {
+                // parse nested playlist
+                final nested = M3uParser.parseToMap(nestedResp.body);
+                if (nested.isNotEmpty && nested.first['url'] != null && nested.first['url']!.isNotEmpty) {
+                  finalUrl = nested.first['url']!;
+                }
+              }
+            } catch (e) {
+              if (kDebugMode) debugPrint('Nested playlist fetch failed for $finalUrl: $e');
+            }
+          }
+
+          // Save VLC options (vlc-*) into meta storage for this channel id
+          final meta = <String, String>{};
+          entry.forEach((k, v) {
+            if (k.startsWith('vlc-')) meta[k] = v;
+          });
+          if (meta.isNotEmpty) {
+            await setChannelMeta(ch.id, meta);
+          }
+
+          // Create a channel instance using finalUrl
+          final updated = Channel(
+            id: ch.id,
+            name: ch.name,
+            streamUrl: finalUrl,
+            logoUrl: ch.logoUrl,
+            groupTitle: ch.groupTitle,
+            tvgId: ch.tvgId,
+            isHttpStream: finalUrl.startsWith('http://'),
+          );
+
+          channels.add(updated);
+        }
 
         if (channels.isEmpty) {
           throw Exception('No channels parsed from M3U');
         }
 
-        if (kDebugMode) debugPrint('✅ Parsed ${channels.length} channels');
+        if (kDebugMode) debugPrint('✅ Parsed ${channels.length} channels (including nested playlists)');
         await _saveToCache(channels);
         return channels;
       } else {
-        throw Exception('Failed to fetch M3U: HTTP ${response.statusCode}');
+        throw Exception('Failed to fetch M3U: HTTP ${response.statusCode}. Body: ${response.body.length} bytes');
       }
     } catch (e) {
       debugPrint('❌ Error fetching from remote: $e');
@@ -111,55 +178,6 @@ class ChannelService {
 
       // No cache and no connection - throw error
       rethrow;
-    }
-  }
-
-  /// Spawn an isolate to parse M3U content. Keeps plugin calls on the main thread.
-  static Future<List<Channel>> _parseM3uInIsolate(String m3uContent) async {
-    final receivePort = ReceivePort();
-    try {
-      await Isolate.spawn(_m3uParserEntry, [receivePort.sendPort, m3uContent]);
-
-      final result = await receivePort.first.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => <Channel>[],
-      );
-
-      if (result is List<Channel>) return result;
-      // If the isolate returned a serializable map/list, attempt to reconstruct
-      if (result is List) {
-        // Try to deserialize if each item is Map
-        try {
-          return result.map((e) {
-            if (e is Map) return Channel.fromJson(Map<String, dynamic>.from(e));
-            throw Exception('Unexpected item type from parser isolate');
-          }).toList();
-        } catch (_) {
-          return <Channel>[];
-        }
-      }
-
-      return <Channel>[];
-    } catch (e) {
-      if (kDebugMode) debugPrint('Isolate parser error: $e');
-      return <Channel>[];
-    } finally {
-      receivePort.close();
-    }
-  }
-
-  /// Entry point for the parser isolate. Receives [SendPort, m3uContent]
-  static Future<void> _m3uParserEntry(List<dynamic> args) async {
-    final SendPort sendPort = args[0];
-    final String m3uContent = args[1];
-
-    try {
-      final channels = M3uParser.parse(m3uContent);
-      // Some objects may not be sendable across isolates; convert to JSON-like maps
-      final serializable = channels.map((c) => c.toJson()).toList();
-      sendPort.send(serializable);
-    } catch (e) {
-      sendPort.send([]);
     }
   }
 
