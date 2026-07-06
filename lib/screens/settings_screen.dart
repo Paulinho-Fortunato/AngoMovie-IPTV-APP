@@ -13,6 +13,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _blockHttpStreams = false;
+  String _m3uUrl = '';
 
   @override
   void initState() {
@@ -22,8 +23,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final url = await ChannelService.getM3uUrl();
     setState(() {
       _blockHttpStreams = prefs.getBool('block_http_streams') ?? false;
+      _m3uUrl = url;
     });
   }
 
@@ -43,6 +46,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('block_http_streams', value);
     setState(() => _blockHttpStreams = value);
+  }
+
+  Future<void> _editM3uUrl() async {
+    final controller = TextEditingController(text: _m3uUrl);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: const Text('URL M3U personalizada', style: TextStyle(color: AppColors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Insira uma URL M3U para testes. Deixe em branco para usar a URL padrão.',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.url,
+              style: const TextStyle(color: AppColors.white),
+              decoration: InputDecoration(
+                hintText: 'http://exemplo.com/lista.m3u',
+                hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.6)),
+                filled: true,
+                fillColor: AppColors.mediumGray.withValues(alpha: 0.06),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              maxLines: 1,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Reset to default
+              await ChannelService.setM3uUrl(null);
+              final newUrl = await ChannelService.getM3uUrl();
+              if (mounted) {
+                setState(() => _m3uUrl = newUrl);
+                Navigator.of(context).pop(true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('URL revertida para a padrão'), backgroundColor: AppColors.darkGray),
+                );
+              }
+            },
+            child: const Text('Resetar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+            onPressed: () async {
+              final text = controller.text.trim();
+              await ChannelService.setM3uUrl(text.isEmpty ? null : text);
+              final newUrl = await ChannelService.getM3uUrl();
+              if (mounted) {
+                setState(() => _m3uUrl = newUrl);
+                Navigator.of(context).pop(true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('URL salva com sucesso'), backgroundColor: AppColors.darkGray),
+                );
+              }
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    // opcional: se salvou, talvez forçar reload da lista em seguida (o user pode usar botão Atualizar na UI)
+    if (result == true) {
+      // nada automático aqui — deixa o usuário atualizar via botão Refresh na home
+    }
   }
 
   @override
@@ -66,6 +145,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _infoTile('Versão', '1.2.0 (Build 3)'),
           _infoTile('Plataforma', 'Android'),
           _infoTile('Fonte de Dados', 'IPTV Remoto'),
+          // Mostrar a URL atual e botão para editar
+          ListTile(
+            leading: const Icon(Icons.link, color: AppColors.textMuted),
+            title: const Text('URL M3U atual', style: TextStyle(color: AppColors.white, fontSize: 14)),
+            subtitle: Text(
+              _m3uUrl,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.edit, color: AppColors.textMuted),
+            onTap: _editM3uUrl,
+          ),
 
           const SizedBox(height: 24),
 
