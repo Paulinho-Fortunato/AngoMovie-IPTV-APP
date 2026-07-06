@@ -8,9 +8,9 @@ import '../models/channel.dart';
 import 'm3u_parser.dart';
 
 class ChannelService {
-  // Default M3U source URL - Direct URL only (backend was causing issues on real devices)
+  // Default M3U source URL - updated to use the raw primary list provided by the user
   static const String _defaultM3uUrl =
-      'http://nitidez.pro:80/get.php?username=Marcio&password=123456&type=m3u_plus';
+      'https://raw.githubusercontent.com/Paulinho-Fortunato/Minha-lista-IPTV/refs/heads/main/M3U_Unida_Organizada..m3u';
   static const String _m3uPrefKey = 'm3u_url';
 
   static const String _lastFetchKey = 'last_fetch_time';
