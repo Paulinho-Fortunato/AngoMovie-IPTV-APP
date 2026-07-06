@@ -18,7 +18,7 @@ class ChannelProvider extends ChangeNotifier {
   
   // Lazy loading state
   int _loadedCategoriesCount = 0;
-  final int _categoriesPerBatch = 5;
+  int _categoriesPerBatch = 5; // made adjustable
   Timer? _categoryLoadTimer;
   final Set<String> _loadingCategories = {};
 
@@ -142,7 +142,24 @@ class ChannelProvider extends ChangeNotifier {
     }
   }
 
-  /// Optimized search with debouncing
+  /// Load ALL categories immediately (disable lazy loading)
+  void loadAllCategories() {
+    if (_allChannels.isEmpty) return;
+    final allCategories = _allChannels.map((c) => c.groupTitle).toSet().toList()..sort();
+    for (final category in allCategories) {
+      final categoryChannels = _allChannels.where((c) => c.groupTitle == category).toList();
+      _categorizedChannels[category] = categoryChannels;
+    }
+    _loadedCategoriesCount = _categorizedChannels.length;
+    notifyListeners();
+  }
+
+  /// Adjust batch size (useful for responsive UI)
+  void setCategoriesPerBatch(int n) {
+    _categoriesPerBatch = n.clamp(1, 100);
+  }
+
+  /// Optimized search with debouncing (called from UI)
   void search(String query) {
     _searchQuery = query.trim();
     if (_searchQuery.isEmpty) {
