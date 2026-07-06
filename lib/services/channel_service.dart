@@ -7,9 +7,10 @@ import '../models/channel.dart';
 import 'm3u_parser.dart';
 
 class ChannelService {
-  // M3U source URL - Direct URL only (backend was causing issues on real devices)
-  static const String _m3uDirectUrl =
+  // Default M3U source URL - Direct URL only (backend was causing issues on real devices)
+  static const String _defaultM3uUrl =
       'http://nitidez.pro:80/get.php?username=Marcio&password=123456&type=m3u_plus';
+  static const String _m3uPrefKey = 'm3u_url';
 
   static const String _lastFetchKey = 'last_fetch_time';
 
@@ -20,6 +21,24 @@ class ChannelService {
       Hive.registerAdapter(ChannelAdapter());
     }
     _channelBox = await Hive.openBox<Channel>('channels');
+  }
+
+  /// Returns the configured M3U URL or the default if not set
+  static Future<String> getM3uUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_m3uPrefKey) ?? _defaultM3uUrl;
+  }
+
+  /// Save a custom M3U URL (null/empty -> resets to default)
+  static Future<void> setM3uUrl(String? url) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (url == null || url.trim().isEmpty) {
+      await prefs.remove(_m3uPrefKey);
+      if (kDebugMode) debugPrint('🔧 M3U URL reset to default.');
+    } else {
+      await prefs.setString(_m3uPrefKey, url.trim());
+      if (kDebugMode) debugPrint('🔧 M3U URL set to: $url');
+    }
   }
 
   /// Load channels from local cache or fetch from remote
@@ -41,11 +60,13 @@ class ChannelService {
 
   static Future<List<Channel>> _fetchFromRemote() async {
     try {
-      // Direct M3U fetch from nitidez.pro
-      if (kDebugMode) debugPrint('📡 Connecting to M3U source: $_m3uDirectUrl');
-      
+      // Use configured M3U URL (or default)
+      final m3uUrl = await getM3uUrl();
+
+      if (kDebugMode) debugPrint('📡 Connecting to M3U source: $m3uUrl');
+
       final response = await http.get(
-        Uri.parse(_m3uDirectUrl),
+        Uri.parse(m3uUrl),
         headers: {
           'User-Agent': 'AngoMovie/1.2.0 Android',
           'Accept': '*/*',
@@ -59,14 +80,14 @@ class ChannelService {
 
       if (response.statusCode == 200) {
         final m3uContent = response.body;
-        
+
         if (m3uContent.isEmpty) {
           throw Exception('M3U content is empty');
         }
 
         if (kDebugMode) debugPrint('🔍 Parsing M3U content...');
         final channels = M3uParser.parse(m3uContent);
-        
+
         if (channels.isEmpty) {
           throw Exception('No channels parsed from M3U');
         }
@@ -79,14 +100,14 @@ class ChannelService {
       }
     } catch (e) {
       debugPrint('❌ Error fetching from remote: $e');
-      
+
       // Return cached data if available (stale but better than nothing)
       final box = _channelBox ?? await Hive.openBox<Channel>('channels');
       if (box.isNotEmpty) {
         if (kDebugMode) debugPrint('💾 Returning ${box.length} cached channels as fallback');
         return box.values.toList();
       }
-      
+
       // No cache and no connection - throw error
       rethrow;
     }
