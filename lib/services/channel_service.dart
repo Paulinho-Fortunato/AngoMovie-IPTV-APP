@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -58,9 +59,9 @@ class ChannelService {
     return await _fetchFromRemote();
   }
 
+  /// Fetch remote M3U on the main thread and parse in an isolate to avoid plugin calls in isolates.
   static Future<List<Channel>> _fetchFromRemote() async {
     try {
-      // Use configured M3U URL (or default)
       final m3uUrl = await getM3uUrl();
 
       if (kDebugMode) debugPrint('📡 Connecting to M3U source: $m3uUrl');
@@ -85,8 +86,8 @@ class ChannelService {
           throw Exception('M3U content is empty');
         }
 
-        if (kDebugMode) debugPrint('🔍 Parsing M3U content...');
-        final channels = M3uParser.parse(m3uContent);
+        // Parse M3U in a separate isolate (parsing is CPU-bound and pure Dart)
+        final channels = await _parseM3uInIsolate(m3uContent);
 
         if (channels.isEmpty) {
           throw Exception('No channels parsed from M3U');
@@ -110,6 +111,55 @@ class ChannelService {
 
       // No cache and no connection - throw error
       rethrow;
+    }
+  }
+
+  /// Spawn an isolate to parse M3U content. Keeps plugin calls on the main thread.
+  static Future<List<Channel>> _parseM3uInIsolate(String m3uContent) async {
+    final receivePort = ReceivePort();
+    try {
+      await Isolate.spawn(_m3uParserEntry, [receivePort.sendPort, m3uContent]);
+
+      final result = await receivePort.first.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => <Channel>[],
+      );
+
+      if (result is List<Channel>) return result;
+      // If the isolate returned a serializable map/list, attempt to reconstruct
+      if (result is List) {
+        // Try to deserialize if each item is Map
+        try {
+          return result.map((e) {
+            if (e is Map) return Channel.fromJson(Map<String, dynamic>.from(e));
+            throw Exception('Unexpected item type from parser isolate');
+          }).toList();
+        } catch (_) {
+          return <Channel>[];
+        }
+      }
+
+      return <Channel>[];
+    } catch (e) {
+      if (kDebugMode) debugPrint('Isolate parser error: $e');
+      return <Channel>[];
+    } finally {
+      receivePort.close();
+    }
+  }
+
+  /// Entry point for the parser isolate. Receives [SendPort, m3uContent]
+  static Future<void> _m3uParserEntry(List<dynamic> args) async {
+    final SendPort sendPort = args[0];
+    final String m3uContent = args[1];
+
+    try {
+      final channels = M3uParser.parse(m3uContent);
+      // Some objects may not be sendable across isolates; convert to JSON-like maps
+      final serializable = channels.map((c) => c.toJson()).toList();
+      sendPort.send(serializable);
+    } catch (e) {
+      sendPort.send([]);
     }
   }
 
