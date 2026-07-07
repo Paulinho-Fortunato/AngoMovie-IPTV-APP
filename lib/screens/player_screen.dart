@@ -44,7 +44,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _initPlayer() async {
-    // Force landscape for player
+    // Forçar modo paisagem e imersivo
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -54,14 +54,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final uri = Uri.parse(widget.channel.streamUrl);
 
-      // --- READ SAVED METADATA (e.g. vlc-http-user-agent / vlc-http-referrer / vlc-http-origin)
+      // --- LEITURA DE METADADOS (vlc-http-user-agent, etc.)
       final meta = await ChannelService.getChannelMeta(widget.channel.id);
       final headers = <String, String>{};
 
-      // Default UA (app)
+      // UA Padrão
       headers['User-Agent'] = 'AngoMovie/1.2.0 Android';
 
-      // Apply vlc opts if present
+      // Aplicar opções do VLC se presentes
       if (meta.containsKey('vlc-http-user-agent')) {
         headers['User-Agent'] = meta['vlc-http-user-agent']!;
       }
@@ -76,7 +76,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         debugPrint('🎯 Player headers for ${widget.channel.name}: $headers');
       }
 
-      _controller = VideoPlayerController.networkUrl(
+      // Se o usuário saiu da tela enquanto os metadados eram carregados
+      if (!mounted) return;
+
+      final controller = VideoPlayerController.networkUrl(
         uri,
         httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(
@@ -85,13 +88,20 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       );
 
-      await _controller!.initialize();
+      _controller = controller;
+      await controller.initialize();
 
-      if (mounted) {
-        setState(() {});
-        await _controller!.play();
-        _controller!.addListener(_onPlayerStateChanged);
+      // PROTEÇÃO: Se o usuário saiu da tela durante a inicialização demorada da rede
+      if (!mounted) {
+        await controller.dispose();
+        if (_controller == controller) _controller = null;
+        return;
       }
+
+      setState(() {});
+      await controller.play();
+      controller.addListener(_onPlayerStateChanged);
+      
     } catch (e, st) {
       if (kDebugMode) debugPrint('❌ Player init error: $e\n$st');
       if (mounted) {
@@ -123,6 +133,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _toggleControls() {
+    if (!mounted) return;
     setState(() {
       _isControlsVisible = !_isControlsVisible;
     });
@@ -135,7 +146,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _togglePlayPause() {
-    if (_controller == null) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
     setState(() {
       if (_controller!.value.isPlaying) {
         _controller!.pause();
@@ -146,21 +157,18 @@ class _PlayerScreenState extends State<PlayerScreen>
     _scheduleHideControls();
   }
 
+  // Métodos de seek mantidos caso precise futuramente (ex: VOD), mas desativados na UI para Live.
   void _seekBackward() {
-    if (_controller == null) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
     final position = _controller!.value.position;
-    _controller!.seekTo(
-      position - const Duration(seconds: 10),
-    );
+    _controller!.seekTo(position - const Duration(seconds: 10));
     _scheduleHideControls();
   }
 
   void _seekForward() {
-    if (_controller == null) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
     final position = _controller!.value.position;
-    _controller!.seekTo(
-      position + const Duration(seconds: 10),
-    );
+    _controller!.seekTo(position + const Duration(seconds: 10));
     _scheduleHideControls();
   }
 
@@ -194,10 +202,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: _toggleControls,
         child: Stack(
           children: [
-            // Video Player
+            // Video Player Layer
             Center(
               child: _hasError
                   ? _buildErrorScreen()
@@ -221,17 +230,20 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
             ),
 
-            // Controls Overlay
+            // Controls Overlay Layer
             if (!_hasError)
-              AnimatedBuilder(
-                animation: _controlsAnimation,
-                builder: (context, child) {
-                  return Opacity(
-                    opacity: 1.0 - _controlsAnimation.value,
-                    child: child,
-                  );
-                },
-                child: _buildControls(),
+              IgnorePointer(
+                ignoring: !_isControlsVisible,
+                child: AnimatedBuilder(
+                  animation: _controlsAnimation,
+                  builder: (context, child) {
+                    return Opacity(
+                      opacity: 1.0 - _controlsAnimation.value,
+                      child: child,
+                    );
+                  },
+                  child: _buildControls(),
+                ),
               ),
           ],
         ),
@@ -258,26 +270,20 @@ class _PlayerScreenState extends State<PlayerScreen>
       ),
       child: Column(
         children: [
-          // Top bar
+          // Top Bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                GestureDetector(
-                  onTap: _exitPlayer,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    child: const Icon(
-                      Icons.arrow_back,
-                      color: AppColors.white,
-                      size: 28,
-                    ),
-                  ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, color: AppColors.white, size: 28),
+                  onPressed: _exitPlayer,
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         widget.channel.name,
@@ -298,12 +304,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ],
                   ),
                 ),
-                // HTTP indicator
-                if (widget.channel.isHttpStream)
+                if (widget.channel.isHttpStream) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
+                      color: Colors.black.withAlpha(153), // Substituído de .withValues por retrocompatibilidade
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: const Text(
@@ -311,43 +316,44 @@ class _PlayerScreenState extends State<PlayerScreen>
                       style: TextStyle(color: AppColors.warning, fontSize: 11),
                     ),
                   ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
                 IconButton(
                   icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
-                  onPressed: () {},
+                  onPressed: () {
+                    // TODO: Implementar menu de configurações (ex: trocar de faixa/áudio)
+                  },
                 ),
               ],
             ),
           ),
 
-          // Center controls
+          // Center Controls
           Expanded(
             child: Center(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Seek backward
-                  GestureDetector(
-                    onTap: _seekBackward,
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.replay_10, color: AppColors.white, size: 36),
-                      ],
+                  // Ocultados os botões de Seek (Avançar/Retroceder) por ser uma transmissão "Ao Vivo".
+                  // Caso mude de ideia, basta remover as condições abaixo.
+                  if (!widget.channel.isHttpStream) ...[
+                    IconButton(
+                      icon: const Icon(Icons.replay_10, color: AppColors.white, size: 36),
+                      onPressed: _seekBackward,
                     ),
-                  ),
+                    const SizedBox(width: 40),
+                  ],
 
-                  const SizedBox(width: 40),
-
-                  // Play/Pause
-                  GestureDetector(
-                    onTap: _togglePlayPause,
-                    child: Container(
+                  // Botão central de Play/Pause com feedback visual nativo
+                  IconButton(
+                    iconSize: 70,
+                    onPressed: _togglePlayPause,
+                    icon: Container(
                       width: 70,
                       height: 70,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: AppColors.accent.withValues(alpha: 0.85),
+                        color: AppColors.accent.withAlpha(216),
                       ),
                       child: Icon(
                         isPlaying ? Icons.pause : Icons.play_arrow,
@@ -357,45 +363,33 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                   ),
 
-                  const SizedBox(width: 40),
-
-                  // Seek forward
-                  GestureDetector(
-                    onTap: _seekForward,
-                    child: const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.forward_10, color: AppColors.white, size: 36),
-                      ],
+                  if (!widget.channel.isHttpStream) ...[
+                    const SizedBox(width: 40),
+                    IconButton(
+                      icon: const Icon(Icons.forward_10, color: AppColors.white, size: 36),
+                      onPressed: _seekForward,
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
           ),
 
-          // Bottom controls
+          // Bottom Bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Progress bar (live indicator)
-                Row(
-                  children: [
-                    Expanded(
-                      child: LinearProgressIndicator(
-                        value: null, // Indeterminate for live
-                        backgroundColor: AppColors.mediumGray,
-                        valueColor: const AlwaysStoppedAnimation(AppColors.accent),
-                        minHeight: 3,
-                      ),
-                    ),
-                  ],
+                const LinearProgressIndicator(
+                  value: null, // Indeterminado para Live streams
+                  backgroundColor: AppColors.mediumGray,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.accent),
+                  minHeight: 3,
                 ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    // LIVE badge
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
@@ -413,14 +407,16 @@ class _PlayerScreenState extends State<PlayerScreen>
                     ),
                     const Spacer(),
                     IconButton(
-                      icon: const Icon(Icons.volume_up,
-                          color: AppColors.white, size: 22),
-                      onPressed: () {},
+                      icon: const Icon(Icons.volume_up, color: AppColors.white, size: 22),
+                      onPressed: () {
+                        // TODO: Mudar volume ou dar Mute
+                      },
                     ),
                     IconButton(
-                      icon: const Icon(Icons.fullscreen,
-                          color: AppColors.white, size: 22),
-                      onPressed: () {},
+                      icon: const Icon(Icons.fullscreen, color: AppColors.white, size: 22),
+                      onPressed: () {
+                        // O player já inicia travado em landscape e full-screen.
+                      },
                     ),
                   ],
                 ),
