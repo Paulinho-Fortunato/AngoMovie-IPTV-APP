@@ -22,12 +22,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final url = await ChannelService.getM3uUrl();
-    setState(() {
-      _blockHttpStreams = prefs.getBool('block_http_streams') ?? false;
-      _m3uUrl = url;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = await ChannelService.getM3uUrl();
+      if (mounted) {
+        setState(() {
+          _blockHttpStreams = prefs.getBool('block_http_streams') ?? false;
+          _m3uUrl = url;
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar configurações: $e');
+    }
   }
 
   Future<void> _clearCache() async {
@@ -45,11 +51,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _toggleBlockHttp(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('block_http_streams', value);
-    setState(() => _blockHttpStreams = value);
+    if (mounted) {
+      setState(() => _blockHttpStreams = value);
+    }
   }
 
   Future<void> _editM3uUrl() async {
     final controller = TextEditingController(text: _m3uUrl);
+    
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -69,9 +78,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: const TextStyle(color: AppColors.white),
               decoration: InputDecoration(
                 hintText: 'http://exemplo.com/lista.m3u',
-                hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.6)),
+                hintStyle: TextStyle(color: AppColors.textMuted.withAlpha(153)),
                 filled: true,
-                fillColor: AppColors.mediumGray.withValues(alpha: 0.06),
+                fillColor: AppColors.mediumGray.withAlpha(15),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               ),
               maxLines: 1,
@@ -85,16 +94,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () async {
-              // Reset to default
+              // Resetar para a URL padrão
               await ChannelService.setM3uUrl(null);
               final newUrl = await ChannelService.getM3uUrl();
-              if (mounted) {
-                setState(() => _m3uUrl = newUrl);
+              if (context.mounted) {
                 Navigator.of(context).pop(true);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('URL revertida para a padrão'), backgroundColor: AppColors.darkGray),
-                );
               }
+              // O setState e SnackBar rodam de forma segura fora do builder
+              _updateUrlState(newUrl, 'URL revertida para a padrão');
             },
             child: const Text('Resetar'),
           ),
@@ -104,13 +111,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               final text = controller.text.trim();
               await ChannelService.setM3uUrl(text.isEmpty ? null : text);
               final newUrl = await ChannelService.getM3uUrl();
-              if (mounted) {
-                setState(() => _m3uUrl = newUrl);
+              if (context.mounted) {
                 Navigator.of(context).pop(true);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('URL salva com sucesso'), backgroundColor: AppColors.darkGray),
-                );
               }
+              _updateUrlState(newUrl, 'URL salva com sucesso');
             },
             child: const Text('Salvar'),
           ),
@@ -118,10 +122,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
 
-    // opcional: se salvou, talvez forçar reload da lista em seguida (o user pode usar botão Atualizar na UI)
+    // Desaloca o controller da memória imediatamente para evitar Memory Leaks
+    controller.dispose();
+
     if (result == true) {
-      // nada automático aqui — deixa o usuário atualizar via botão Refresh na home
+      // Opcional: Adicionar lógica se necessitar atualizar componentes externos
     }
+  }
+
+  // Helper centralizado para atualizar estados de forma assíncrona e segura
+  void _updateUrlState(String newUrl, String message) {
+    if (!mounted) return;
+    setState(() => _m3uUrl = newUrl);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.darkGray,
+      ),
+    );
   }
 
   @override
@@ -140,17 +158,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // App Info Section
+          // Seção: Sobre o App
           _sectionTitle('Sobre o App'),
           _infoTile('Versão', '1.2.0 (Build 3)'),
           _infoTile('Plataforma', 'Android'),
           _infoTile('Fonte de Dados', 'IPTV Remoto'),
-          // Mostrar a URL atual e botão para editar
+          
           ListTile(
             leading: const Icon(Icons.link, color: AppColors.textMuted),
             title: const Text('URL M3U atual', style: TextStyle(color: AppColors.white, fontSize: 14)),
             subtitle: Text(
-              _m3uUrl,
+              _m3uUrl.isEmpty ? 'URL Padrão do Sistema' : _m3uUrl,
               style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -161,7 +179,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // Cache Section
+          // Seção: Cache e Dados
           _sectionTitle('Cache e Dados'),
           _actionTile(
             icon: Icons.delete_sweep,
@@ -172,7 +190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // Security Section
+          // Seção: Segurança
           _sectionTitle('Segurança da Conexão'),
           _settingsTile(
             title: 'Informação HTTP',
@@ -196,7 +214,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // Privacy Section
+          // Seção: Privacidade
           _sectionTitle('Privacidade'),
           ListTile(
             leading: const Icon(Icons.privacy_tip, color: AppColors.textMuted),
@@ -213,7 +231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // About
+          // Seção: Créditos
           _sectionTitle('Créditos'),
           _settingsTile(
             title: 'AngoMovie IPTV',
