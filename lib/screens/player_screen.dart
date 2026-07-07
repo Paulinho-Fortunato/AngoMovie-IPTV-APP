@@ -44,7 +44,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _initPlayer() async {
-    // Forçar modo paisagem e imersivo
+    // Forçar modo paisagem e imersivo ao entrar no player
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -58,10 +58,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       final meta = await ChannelService.getChannelMeta(widget.channel.id);
       final headers = <String, String>{};
 
-      // UA Padrão
+      // User-Agent Padrão do app
       headers['User-Agent'] = 'AngoMovie/1.2.0 Android';
 
-      // Aplicar opções do VLC se presentes
+      // Aplicar opções personalizadas do VLC se estiverem presentes
       if (meta.containsKey('vlc-http-user-agent')) {
         headers['User-Agent'] = meta['vlc-http-user-agent']!;
       }
@@ -76,7 +76,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         debugPrint('🎯 Player headers for ${widget.channel.name}: $headers');
       }
 
-      // Se o usuário saiu da tela enquanto os metadados eram carregados
+      // Se o usuário saiu da tela enquanto os metadados eram carregados da API
       if (!mounted) return;
 
       final controller = VideoPlayerController.networkUrl(
@@ -126,7 +126,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && _isControlsVisible) {
-        _controlsAnimController.forward();
+        _controlsAnimController.forward(); // Faz o efeito fade-out rodar
         setState(() => _isControlsVisible = false);
       }
     });
@@ -138,10 +138,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isControlsVisible = !_isControlsVisible;
     });
     if (_isControlsVisible) {
-      _controlsAnimController.reverse();
-      _scheduleHideControls();
+      _controlsAnimController.reverse(); // Mostra os controles
+      _scheduleHideControls(); // Inicia contagem para sumir de novo
     } else {
-      _controlsAnimController.forward();
+      _controlsAnimController.forward(); // Esconde os controles
     }
   }
 
@@ -154,22 +154,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _controller!.play();
       }
     });
-    _scheduleHideControls();
-  }
-
-  // Métodos de seek mantidos caso precise futuramente (ex: VOD), mas desativados na UI para Live.
-  void _seekBackward() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-    final position = _controller!.value.position;
-    _controller!.seekTo(position - const Duration(seconds: 10));
-    _scheduleHideControls();
-  }
-
-  void _seekForward() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
-    final position = _controller!.value.position;
-    _controller!.seekTo(position + const Duration(seconds: 10));
-    _scheduleHideControls();
+    _scheduleHideControls(); // Reinicia o timer ao clicar para não sumir na hora
   }
 
   Future<void> _exitPlayer() async {
@@ -203,10 +188,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       backgroundColor: Colors.black,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _toggleControls,
+        onTap: _toggleControls, // Toque no fundo alterna a visibilidade de TUDO
         child: Stack(
           children: [
-            // Video Player Layer
+            // Camada 1: O Vídeo Player
             Center(
               child: _hasError
                   ? _buildErrorScreen()
@@ -230,10 +215,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
             ),
 
-            // Controls Overlay Layer
+            // Camada 2: Toda a interface de controle (Envolvida na animação)
             if (!_hasError)
               IgnorePointer(
-                ignoring: !_isControlsVisible,
+                ignoring: !_isControlsVisible, // Bloqueia toques fantasmas quando invisível
                 child: AnimatedBuilder(
                   animation: _controlsAnimation,
                   builder: (context, child) {
@@ -260,17 +245,17 @@ class _PlayerScreenState extends State<PlayerScreen>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xCC000000),
+            Color(0xCC000000), // Sombra superior
             Colors.transparent,
             Colors.transparent,
-            Color(0xCC000000),
+            Color(0xCC000000), // Sombra inferior
           ],
-          stops: [0.0, 0.2, 0.75, 1.0],
+          stops: [0.0, 0.25, 0.75, 1.0],
         ),
       ),
       child: Column(
         children: [
-          // Top Bar
+          // 1. BARRA SUPERIOR
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
@@ -308,7 +293,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(153), // Substituído de .withValues por retrocompatibilidade
+                      color: Colors.black.withAlpha(153),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: const Text(
@@ -321,104 +306,70 @@ class _PlayerScreenState extends State<PlayerScreen>
                 IconButton(
                   icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
                   onPressed: () {
-                    // TODO: Implementar menu de configurações (ex: trocar de faixa/áudio)
+                    _scheduleHideControls(); // Adia o sumiço automático
+                    // TODO: Menu de definições
                   },
                 ),
               ],
             ),
           ),
 
-          // Center Controls
+          // 2. BOTÃO CENTRAL (PLAY/PAUSE)
           Expanded(
             child: Center(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Ocultados os botões de Seek (Avançar/Retroceder) por ser uma transmissão "Ao Vivo".
-                  // Caso mude de ideia, basta remover as condições abaixo.
-                  if (!widget.channel.isHttpStream) ...[
-                    IconButton(
-                      icon: const Icon(Icons.replay_10, color: AppColors.white, size: 36),
-                      onPressed: _seekBackward,
-                    ),
-                    const SizedBox(width: 40),
-                  ],
-
-                  // Botão central de Play/Pause com feedback visual nativo
-                  IconButton(
-                    iconSize: 70,
-                    onPressed: _togglePlayPause,
-                    icon: Container(
-                      width: 70,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppColors.accent.withAlpha(216),
-                      ),
-                      child: Icon(
-                        isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: AppColors.white,
-                        size: 40,
-                      ),
-                    ),
+              child: IconButton(
+                iconSize: 70,
+                onPressed: _togglePlayPause,
+                icon: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.accent.withAlpha(216),
                   ),
-
-                  if (!widget.channel.isHttpStream) ...[
-                    const SizedBox(width: 40),
-                    IconButton(
-                      icon: const Icon(Icons.forward_10, color: AppColors.white, size: 36),
-                      onPressed: _seekForward,
-                    ),
-                  ],
-                ],
+                  child: Icon(
+                    isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: AppColors.white,
+                    size: 40,
+                  ),
+                ),
               ),
             ),
           ),
 
-          // Bottom Bar
+          // 3. BARRA INFERIOR (Barra vermelha removida com sucesso)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Row(
               children: [
-                const LinearProgressIndicator(
-                  value: null, // Indeterminado para Live streams
-                  backgroundColor: AppColors.mediumGray,
-                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.accent),
-                  minHeight: 3,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'AO VIVO',
+                    style: TextStyle(
+                      color: AppColors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'AO VIVO',
-                        style: TextStyle(
-                          color: AppColors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.volume_up, color: AppColors.white, size: 22),
-                      onPressed: () {
-                        // TODO: Mudar volume ou dar Mute
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.fullscreen, color: AppColors.white, size: 22),
-                      onPressed: () {
-                        // O player já inicia travado em landscape e full-screen.
-                      },
-                    ),
-                  ],
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.volume_up, color: AppColors.white, size: 22),
+                  onPressed: () {
+                    _scheduleHideControls(); // Adia o sumiço automático
+                    // TODO: Controle de volume
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.fullscreen, color: AppColors.white, size: 22),
+                  onPressed: () {
+                    _scheduleHideControls(); // Adia o sumiço automático
+                  },
                 ),
               ],
             ),
