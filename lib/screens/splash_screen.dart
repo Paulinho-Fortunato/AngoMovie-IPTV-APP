@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/channel_provider.dart';
@@ -22,9 +23,9 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _fadeAnimation;
   late Animation<double> _pulseAnimation;
 
-
   bool _showSecondaryText = false;
   int _dotCount = 0;
+  Timer? _dotsTimer; // Timer para controlar a animação dos pontos de forma segura
 
   @override
   void initState() {
@@ -57,10 +58,16 @@ class _SplashScreenState extends State<SplashScreen>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Animate dots
-    Future.delayed(const Duration(milliseconds: 500), _animateDots);
+    // Substituído o Future.delayed recursivo por um Timer.periodic limpo e seguro
+    _dotsTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) {
+      if (mounted) {
+        setState(() {
+          _dotCount = (_dotCount + 1) % 4;
+        });
+      }
+    });
 
-    // Show secondary text after 2 seconds
+    // Mostrar texto secundário após 2 segundos de forma segura
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         setState(() => _showSecondaryText = true);
@@ -68,52 +75,56 @@ class _SplashScreenState extends State<SplashScreen>
     });
   }
 
-  void _animateDots() {
-    if (!mounted) return;
-    setState(() {
-      _dotCount = (_dotCount + 1) % 4;
-    });
-    Future.delayed(const Duration(milliseconds: 400), _animateDots);
-  }
-
   Future<void> _startLoading() async {
-    // Check privacy accepted
-    final prefs = await SharedPreferences.getInstance();
-    final privacyAccepted = prefs.getBool('privacy_accepted') ?? false;
+    try {
+      // Verificar se a privacidade foi aceita
+      final prefs = await SharedPreferences.getInstance();
+      final privacyAccepted = prefs.getBool('privacy_accepted') ?? false;
 
-    // Initialize Hive
-    await ChannelService.initHive();
+      // Inicializar o Hive para armazenamento local
+      await ChannelService.initHive();
 
-    // Load channels
-    if (mounted) {
-      final provider = context.read<ChannelProvider>();
-      await provider.loadChannels();
+      // Carregar os canais via Provider de forma segura
+      if (mounted) {
+        await context.read<ChannelProvider>().loadChannels();
+      }
+
+      // Garantir um tempo mínimo visual para a Splash Screen
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      if (!mounted) return;
+
+      // Executar animação de Fade Out da tela inteira
+      await _fadeController.forward();
+
+      if (!mounted) return;
+
+      // Navegar para a próxima tela eliminando a Splash da pilha
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              privacyAccepted ? const HomeScreen() : const PrivacyScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 500),
+        ),
+      );
+    } catch (e) {
+      // Evita travamentos se algo falhar na inicialização
+      debugPrint('Erro na inicialização da Splash: $e');
+      if (mounted) {
+        // Redireciona mesmo com erro para não prender o usuário na Splash
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const PrivacyScreen()),
+        );
+      }
     }
-
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    if (!mounted) return;
-
-    // Fade out
-    await _fadeController.forward();
-
-    if (!mounted) return;
-
-    // Navigate
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            privacyAccepted ? const HomeScreen() : const PrivacyScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-        transitionDuration: const Duration(milliseconds: 500),
-      ),
-    );
   }
 
   @override
   void dispose() {
+    _dotsTimer?.cancel(); // Cancelar o Timer dos pontinhos obrigatoriamente
     _rotationController.dispose();
     _fadeController.dispose();
     _pulseController.dispose();
@@ -146,7 +157,7 @@ class _SplashScreenState extends State<SplashScreen>
               children: [
                 const Spacer(flex: 2),
 
-                // App Logo
+                // Ícone/Logo do Aplicativo com efeito Pulse
                 ScaleTransition(
                   scale: _pulseAnimation,
                   child: Container(
@@ -189,7 +200,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const SizedBox(height: 16),
 
-                // App Name
+                // Nome do Aplicativo
                 const Text(
                   'ANGOMOVIE',
                   style: TextStyle(
@@ -211,7 +222,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const Spacer(),
 
-                // Loading Indicator
+                // Indicador de Carregamento Rotativo
                 RotationTransition(
                   turns: _rotationController,
                   child: Container(
@@ -250,7 +261,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const SizedBox(height: 24),
 
-                // Loading Text
+                // Texto de Carregamento Dinâmico (Carregando experiência...)
                 Text(
                   'Carregando experiência$dots',
                   style: const TextStyle(
@@ -261,7 +272,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const SizedBox(height: 8),
 
-                // Secondary Text
+                // Texto Secundário com Animação de Opacidade Nativa
                 AnimatedOpacity(
                   opacity: _showSecondaryText ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 500),
@@ -276,7 +287,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                 const Spacer(),
 
-                // Version
+                // Rodapé com a Versão do App
                 Padding(
                   padding: const EdgeInsets.only(bottom: 32),
                   child: Text(
