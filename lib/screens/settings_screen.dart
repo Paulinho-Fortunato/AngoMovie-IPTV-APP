@@ -15,6 +15,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _blockHttpStreams = false;
+  bool _hideVod = false; // Novo Estado: Ocultar/Mostrar VOD
   String _m3uUrl = '';
   bool _isClearing = false;
 
@@ -28,10 +29,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final url = await ChannelService.getM3uUrl();
+      final hideVod = await ChannelService.getHideVod(); // Busca do Hive/Prefs
+      
       if (mounted) {
         setState(() {
           _blockHttpStreams = prefs.getBool('block_http_streams') ?? false;
           _m3uUrl = url;
+          _hideVod = hideVod; // Inicializa o estado de VOD
         });
       }
     } catch (e) {
@@ -69,6 +73,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _blockHttpStreams = value);
       // REATIVIDADE: Recarrega os canais respeitando o novo filtro de segurança
       context.read<ChannelProvider>().refreshChannels();
+    }
+  }
+
+  // Novo método para alternar a exibição de VOD (Filmes e Séries)
+  Future<void> _toggleHideVod(bool value) async {
+    await ChannelService.setHideVod(value);
+    if (mounted) {
+      setState(() => _hideVod = value);
+      // REATIVIDADE: Reconstrói e recarrega os canais instantaneamente na Home
+      context.read<ChannelProvider>().refreshChannels();
+      _showSuccessSnackBar(
+        value 
+          ? 'Filmes e Séries ocultados. Carregando TV ao Vivo.' 
+          : 'Lista completa de canais, filmes e séries ativada!'
+      );
     }
   }
 
@@ -241,7 +260,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // SEÇÃO 2: CACHE E DESEMPENHO
+          // NOVA SEÇÃO: PREFERÊNCIAS DE CONTEÚDO (VOD)
+          _sectionTitle('Preferências de Conteúdo'),
+          _buildCard(
+            children: [
+              SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                title: const Text(
+                  'Ocultar Filmes e Séries (VOD)',
+                  style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+                subtitle: const Text(
+                  'Filtra e exibe apenas canais de TV ao vivo. Ative para economizar memória ou desative para carregar Filmes, Séries, Novelas e Animes.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.4),
+                ),
+                value: _hideVod,
+                onChanged: _toggleHideVod,
+                activeColor: AppColors.accent,
+                activeTrackColor: AppColors.accent.withValues(alpha: 0.3),
+                inactiveThumbColor: AppColors.textMuted,
+                inactiveTrackColor: AppColors.mediumGray.withValues(alpha: 0.3),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // SEÇÃO 3: CACHE E DESEMPENHO
           _sectionTitle('Dados & Desempenho'),
           _buildCard(
             children: [
@@ -259,7 +304,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // SEÇÃO 3: SEGURANÇA E PROTOCOLO
+          // SEÇÃO 4: SEGURANÇA E PROTOCOLO
           _sectionTitle('Rede & Segurança'),
           _buildCard(
             children: [
@@ -285,7 +330,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 24),
 
-          // SEÇÃO 4: SUPORTE E PRIVACIDADE
+          // SEÇÃO 5: SUPORTE E PRIVACIDADE
           _sectionTitle('Legal & Suporte'),
           _buildCard(
             children: [
@@ -297,7 +342,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    // CORREÇÃO CRÍTICA DO BUG DE LOOP DE NAVEGAÇÃO
                     builder: (_) => const PrivacyScreen(isGateMode: false),
                   ),
                 ),
