@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // Importação do Hive Flutter
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'providers/channel_provider.dart';
 import 'screens/splash_screen.dart';
@@ -61,13 +61,13 @@ void main() async {
         debugPrint('⚠️ Alerta: Falha ao travar orientação do ecrã.');
       }
 
-      // 3. Inicialização segura e síncrona do Hive e SharedPreferences
+      // Inicialização segura e síncrona do Hive e SharedPreferences
       try {
         debugPrint('📦 Inicializando Hive Flutter Engine...');
-        await Hive.initFlutter(); // <-- LINHA CRÍTICA ADICIONADA! Inicializa o core do banco de dados
+        await Hive.initFlutter();
         
         debugPrint('📦 Abrindo tabelas locais...');
-        await ChannelService.initHive(); // Inicializa adaptadores e abre as tabelas
+        await ChannelService.initHive();
         debugPrint('✅ Hive e tabelas prontas para uso.');
       } catch (e, stack) {
         debugPrint('❌ Falha catastrófica ao iniciar o Hive: $e');
@@ -170,7 +170,7 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Column(
-                mainAxisAlignment: Main => MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center, // <-- CORREÇÃO: Sintaxe limpa restaurada!
                 children: [
                   const Icon(Icons.error_outline_outlined, color: Colors.redAccent, size: 72),
                   const SizedBox(height: 24),
