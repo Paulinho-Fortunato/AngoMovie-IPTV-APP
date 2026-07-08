@@ -1,16 +1,27 @@
+// lib/main.dart
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // Importação do Hive Flutter
 
 import 'providers/channel_provider.dart';
 import 'screens/splash_screen.dart';
-import 'services/channel_service.dart'; // Importação necessária para inicialização segura
+import 'services/channel_service.dart';
 import 'utils/app_theme.dart';
 
-/// Grava de forma segura logs de falha no armazenamento local do dispositivo
+/// CLASSE DE SEGURANÇA BATCH: Força o Flutter a aceitar conexões HTTP/HTTPS 
+/// de painéis IPTV com certificados SSL expirados, autoassinados ou inválidos.
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+  }
+}
+
 Future<void> _writeCrashLog(String error) async {
   try {
     final dir = await getApplicationDocumentsDirectory();
@@ -26,7 +37,9 @@ Future<void> _writeCrashLog(String error) async {
 }
 
 void main() async {
-  // Captura erros síncronos lançados pela engine do Flutter
+  // ATIVAÇÃO DO BYPASS SSL
+  HttpOverrides.global = MyHttpOverrides();
+
   FlutterError.onError = (FlutterErrorDetails details) {
     final exception = details.exceptionAsString();
     final stackTrace = details.stack.toString();
@@ -35,13 +48,10 @@ void main() async {
     _writeCrashLog('FLUTTER CRASH EXCEPTION:\n$exception\n\nSTACK TRACE:\n$stackTrace');
   };
 
-  // Executa o aplicativo dentro de uma Zona Protegida contra falhas assíncronas (ex: requisições HTTP órfãs)
   runZonedGuarded(
     () async {
-      // 1. Inicializa os canais de ligação nativos do Flutter obrigatoriamente como primeira instrução
       WidgetsFlutterBinding.ensureInitialized();
       
-      // 2. Trava a orientação padrão em modo Retrato (Portrait)
       try {
         await SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,
@@ -51,10 +61,13 @@ void main() async {
         debugPrint('⚠️ Alerta: Falha ao travar orientação do ecrã.');
       }
 
-      // 3. Inicialização segura e centralizada de Banco de Dados local (Hive)
+      // 3. Inicialização segura e síncrona do Hive e SharedPreferences
       try {
-        debugPrint('📦 Inicializando banco de dados local (Hive)...');
-        await ChannelService.initHive(); // Inicializa o Hive, registra adaptadores e abre as boxes
+        debugPrint('📦 Inicializando Hive Flutter Engine...');
+        await Hive.initFlutter(); // <-- LINHA CRÍTICA ADICIONADA! Inicializa o core do banco de dados
+        
+        debugPrint('📦 Abrindo tabelas locais...');
+        await ChannelService.initHive(); // Inicializa adaptadores e abre as tabelas
         debugPrint('✅ Hive e tabelas prontas para uso.');
       } catch (e, stack) {
         debugPrint('❌ Falha catastrófica ao iniciar o Hive: $e');
@@ -86,10 +99,9 @@ class AngoMovieApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system, // Segue o tema padrão configurado no sistema do telemóvel
+        themeMode: ThemeMode.system, 
         home: const SplashScreen(),
         builder: (context, child) {
-          // Injeta a barreira inteligente de proteção contra falhas visuais de widgets
           return _ErrorBoundary(child: child!);
         },
       ),
@@ -97,7 +109,6 @@ class AngoMovieApp extends StatelessWidget {
   }
 }
 
-/// Widget Boundary que intercepta falhas de renderização de forma dinâmica
 class _ErrorBoundary extends StatefulWidget {
   final Widget child;
 
@@ -116,7 +127,6 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
     super.initState();
     _loadDynamicLogPath();
 
-    // INTERCEPTADOR ATIVO: Redireciona a tela vermelha da morte para a nossa UI customizada
     ErrorWidget.builder = (FlutterErrorDetails details) {
       if (mounted) {
         setState(() {
@@ -124,13 +134,10 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
         });
       }
       _writeCrashLog('RENDER ENGINE CRASH:\n${details.exceptionAsString()}\n\nSTACK:\n${details.stack}');
-      
-      // Retorna um widget vazio temporário para evitar loops visuais de crash
       return const SizedBox.shrink();
     };
   }
 
-  /// Resolve o caminho absoluto do arquivo de logs de forma dinâmica para cada telemóvel
   Future<void> _loadDynamicLogPath() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -149,7 +156,6 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
   @override
   void didUpdateWidget(_ErrorBoundary oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Limpa o erro se o widget for atualizado pelo sistema de hot-reload ou navegação
     setState(() => _errorMessage = null);
   }
 
@@ -159,12 +165,12 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(
-          backgroundColor: const Color(0xFF060E1A), // Fundo azul escuro premium do app
+          backgroundColor: const Color(0xFF060E1A), 
           body: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: Main => MainAxisAlignment.center,
                 children: [
                   const Icon(Icons.error_outline_outlined, color: Colors.redAccent, size: 72),
                   const SizedBox(height: 24),
@@ -184,8 +190,6 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
-                  
-                  // Bloco de visualização de erro técnico
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
@@ -205,19 +209,17 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
                   ElevatedButton.icon(
                     onPressed: () => setState(() => _errorMessage = null),
                     icon: const Icon(Icons.refresh, color: Colors.white),
                     label: const Text('Recarregar Interface', style: TextStyle(color: Colors.white)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD32F2F), // Cor vermelha amigável
+                      backgroundColor: const Color(0xFFD32F2F), 
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  
                   const Text(
                     'Caminho físico do ficheiro de depuração:',
                     style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold),
