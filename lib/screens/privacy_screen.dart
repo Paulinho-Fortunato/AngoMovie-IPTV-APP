@@ -5,13 +5,11 @@ import '../utils/app_colors.dart';
 import 'home_screen.dart';
 
 class PrivacyScreen extends StatefulWidget {
-  /// Se [isGateMode] for `true`, a tela funciona como bloqueio inicial (exige clique em aceitar).
-  /// Se for `false`, funciona como tela de consulta (com botão para voltar e sem exigir aceite).
   final bool isGateMode;
 
   const PrivacyScreen({
     super.key,
-    this.isGateMode = true, // Por padrão, assume que é o bloqueio inicial
+    this.isGateMode = true,
   });
 
   @override
@@ -25,7 +23,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
   @override
   void initState() {
     super.initState();
-    // Se não for modo bloqueio, não precisamos monitorar o scroll
     if (widget.isGateMode) {
       _scrollController.addListener(_onScroll);
     } else {
@@ -49,7 +46,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     
     if (!context.mounted) return;
     
-    // Substitui a árvore de navegação para que o usuário não consiga voltar para esta tela
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
@@ -65,7 +61,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      // Se for modo de consulta, exibe uma barra de voltar elegante no topo
       appBar: !widget.isGateMode
           ? AppBar(
               backgroundColor: Colors.transparent,
@@ -117,7 +112,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                 const SizedBox(height: 24),
               ],
               
-              // Container com os Termos de Uso e Rolagem
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
@@ -167,7 +161,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                 ),
               ),
               
-              // Exibe o botão de confirmação apenas se estiver no modo de Bloqueio Inicial
               if (widget.isGateMode) ...[
                 const SizedBox(height: 20),
                 AnimatedOpacity(
@@ -177,7 +170,6 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      // Força o usuário a rolar os termos até o fim antes de liberar o botão (Garante segurança jurídica)
                       onPressed: _hasScrolledToBottom ? () => _accept(context) : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.accent,
@@ -213,7 +205,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     required String text,
   }) {
     return Padding(
-      // CORREÇÃO DA DIRETIVA DE PADDING DE ENTRADA DO FLUTTER
+      // CORREÇÃO EFETUADA: EdgeInsets.only em vez do inexistente EdgeInsets.bottom
       padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
