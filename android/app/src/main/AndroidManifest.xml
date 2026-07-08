@@ -1,48 +1,57 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.angomovie.angomovie_iptv"> <!-- Certifique-se de manter o nome do seu pacote aqui -->
 
-    <!-- Required permissions -->
+    <!-- PERMISSÕES DE PRODUÇÃO -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Wakelock para impedir que a TV/Telemóvel apague a tela no meio do filme -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/> 
+
+    <!-- CONFIGURAÇÃO CRÍTICA DE HARDWARE PARA ANDROID TV -->
+    <!-- Informa à Google Play que o app NÃO exige tela de toque, permitindo a instalação em TVs -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.keyboard" android:required="false" />
 
     <application
         android:label="AngoMovie IPTV"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"
-        android:networkSecurityConfig="@xml/network_security_config"
-        android:hardwareAccelerated="true">
-
+        android:banner="@draw/tv_banner" <!-- Banner retangular (320x180) exibido na tela da TV -->
+        android:logo="@draw/tv_banner"
+        android:hardwareAccelerated="true" <!-- Força aceleração por GPU para renderização de vídeos a 60FPS -->
+        android:theme="@style/LaunchTheme">
+        
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|locale|layoutDirection"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
+            
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            
+            <!-- 1. ATIVADOR PADRÃO: Telemóvel e Tablets -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-        </activity>
 
-        <!-- Flutter embedding -->
+            <!-- 2. ATIVADOR LEANBACK: Android TV e TV Box -->
+            <!-- Faz com que o app apareça no carrossel de canais da Smart TV -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+        
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
-
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
-        </intent>
-    </queries>
 </manifest>
-
