@@ -1,85 +1,73 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
-import 'dart:io';
-import 'dart:async';
 import 'package:path_provider/path_provider.dart';
+
 import 'providers/channel_provider.dart';
 import 'screens/splash_screen.dart';
+import 'services/channel_service.dart'; // Importação necessária para inicialização segura
 import 'utils/app_theme.dart';
 
+/// Grava de forma segura logs de falha no armazenamento local do dispositivo
 Future<void> _writeCrashLog(String error) async {
   try {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/crash_log.txt');
-    final timestamp = DateTime.now().toString();
-    final content = '$timestamp\n$error\n\n---\n';
+    final timestamp = DateTime.now().toIso8601String();
+    final content = '$timestamp\n$error\n\n=================================\n';
     
-    if (await file.exists()) {
-      await file.writeAsString(content, mode: FileMode.append);
-    } else {
-      await file.writeAsString(content);
-    }
-    debugPrint('✅ Crash log saved: ${file.path}');
+    await file.writeAsString(content, mode: FileMode.append);
+    debugPrint('💾 Log de erro salvo em: ${file.path}');
   } catch (e) {
-    debugPrint('❌ Failed to write crash log: $e');
+    debugPrint('❌ Falha ao tentar gravar log físico: $e');
   }
 }
 
 void main() async {
-  // Global error handler for Flutter errors
+  // Captura erros síncronos lançados pela engine do Flutter
   FlutterError.onError = (FlutterErrorDetails details) {
-    debugPrint('🔴 Flutter Error: ${details.exceptionAsString()}');
-    debugPrint('Stack: ${details.stack}');
-    _writeCrashLog(
-      'FLUTTER ERROR\n${details.exceptionAsString()}\nSTACK:\n${details.stack}',
-    );
+    final exception = details.exceptionAsString();
+    final stackTrace = details.stack.toString();
+    
+    debugPrint('🔴 Erro crítico do Flutter interceptado: $exception');
+    _writeCrashLog('FLUTTER CRASH EXCEPTION:\n$exception\n\nSTACK TRACE:\n$stackTrace');
   };
 
-  // Global error handler for uncaught async errors
+  // Executa o aplicativo dentro de uma Zona Protegida contra falhas assíncronas (ex: requisições HTTP órfãs)
   runZonedGuarded(
     () async {
+      // 1. Inicializa os canais de ligação nativos do Flutter obrigatoriamente como primeira instrução
+      WidgetsFlutterBinding.ensureInitialized();
+      
+      // 2. Trava a orientação padrão em modo Retrato (Portrait)
       try {
-        // Initialize Flutter bindings
-        WidgetsFlutterBinding.ensureInitialized();
-        
-        // Lock orientation
-        try {
-          await SystemChrome.setPreferredOrientations([
-            DeviceOrientation.portraitUp,
-            DeviceOrientation.portraitDown,
-          ]);
-        } catch (e) {
-          debugPrint('⚠️ Orientation lock failed: $e');
-          _writeCrashLog('Orientation lock error: $e');
-        }
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ]);
+      } catch (e) {
+        debugPrint('⚠️ Alerta: Falha ao travar orientação do ecrã.');
+      }
 
-        // Initialize Hive with error handling
-        try {
-          debugPrint('📦 Initializing Hive...');
-          await Hive.initFlutter();
-          debugPrint('✅ Hive initialized successfully');
-        } catch (e) {
-          debugPrint('❌ Hive initialization failed: $e');
-          _writeCrashLog('Hive init error: $e\nStack: ${StackTrace.current}');
-          rethrow;
-        }
-
-        // Run the app
-        debugPrint('🚀 Starting AngoMovieApp...');
-        runApp(const AngoMovieApp());
+      // 3. Inicialização segura e centralizada de Banco de Dados local (Hive)
+      try {
+        debugPrint('📦 Inicializando banco de dados local (Hive)...');
+        await ChannelService.initHive(); // Inicializa o Hive, registra adaptadores e abre as boxes
+        debugPrint('✅ Hive e tabelas prontas para uso.');
       } catch (e, stack) {
-        debugPrint('🔴 Main initialization error: $e');
-        debugPrint('Stack: $stack');
-        _writeCrashLog('MAIN INIT ERROR\n$e\nSTACK:\n$stack');
+        debugPrint('❌ Falha catastrófica ao iniciar o Hive: $e');
+        _writeCrashLog('HIVE BOOTSTRAP FAILURE:\n$e\n\nSTACK:\n$stack');
         rethrow;
       }
+
+      debugPrint('🚀 AngoMovie inicializado com sucesso. Iniciando UI.');
+      runApp(const AngoMovieApp());
     },
     (error, stack) {
-      debugPrint('🔴 Uncaught error in zone: $error');
-      debugPrint('Stack: $stack');
-      _writeCrashLog('ZONE ERROR\n$error\nSTACK:\n$stack');
+      debugPrint('🔴 Erro assíncrono capturado pela zona: $error');
+      _writeCrashLog('UNCAUGHT ZONE ERROR:\n$error\n\nSTACK TRACE:\n$stack');
     },
   );
 }
@@ -98,10 +86,10 @@ class AngoMovieApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system,
+        themeMode: ThemeMode.system, // Segue o tema padrão configurado no sistema do telemóvel
         home: const SplashScreen(),
         builder: (context, child) {
-          // Global error widget builder
+          // Injeta a barreira inteligente de proteção contra falhas visuais de widgets
           return _ErrorBoundary(child: child!);
         },
       ),
@@ -109,6 +97,7 @@ class AngoMovieApp extends StatelessWidget {
   }
 }
 
+/// Widget Boundary que intercepta falhas de renderização de forma dinâmica
 class _ErrorBoundary extends StatefulWidget {
   final Widget child;
 
@@ -120,10 +109,47 @@ class _ErrorBoundary extends StatefulWidget {
 
 class _ErrorBoundaryState extends State<_ErrorBoundary> {
   String? _errorMessage;
+  String _dynamicLogPath = 'A calcular diretório...';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDynamicLogPath();
+
+    // INTERCEPTADOR ATIVO: Redireciona a tela vermelha da morte para a nossa UI customizada
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = details.exceptionAsString();
+        });
+      }
+      _writeCrashLog('RENDER ENGINE CRASH:\n${details.exceptionAsString()}\n\nSTACK:\n${details.stack}');
+      
+      // Retorna um widget vazio temporário para evitar loops visuais de crash
+      return const SizedBox.shrink();
+    };
+  }
+
+  /// Resolve o caminho absoluto do arquivo de logs de forma dinâmica para cada telemóvel
+  Future<void> _loadDynamicLogPath() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      if (mounted) {
+        setState(() {
+          _dynamicLogPath = '${dir.path}/crash_log.txt';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _dynamicLogPath = 'Armazenamento interno protegido.');
+      }
+    }
+  }
 
   @override
   void didUpdateWidget(_ErrorBoundary oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Limpa o erro se o widget for atualizado pelo sistema de hot-reload ou navegação
     setState(() => _errorMessage = null);
   }
 
@@ -131,18 +157,19 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
   Widget build(BuildContext context) {
     if (_errorMessage != null) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         home: Scaffold(
-          backgroundColor: Colors.black,
+          backgroundColor: const Color(0xFF060E1A), // Fundo azul escuro premium do app
           body: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 64),
+                  const Icon(Icons.error_outline_outlined, color: Colors.redAccent, size: 72),
                   const SizedBox(height: 24),
                   const Text(
-                    'Erro ao carregar aplicativo',
+                    'Erro no carregamento visual',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 20,
@@ -150,27 +177,58 @@ class _ErrorBoundaryState extends State<_ErrorBoundary> {
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: const TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 14,
-                    ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Um componente do aplicativo falhou ao tentar ser exibido no ecrã.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
+                  
+                  // Bloco de visualização de erro técnico
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      _errorMessage!,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  
                   ElevatedButton.icon(
                     onPressed: () => setState(() => _errorMessage = null),
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Tentar Novamente'),
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    label: const Text('Recarregar Interface', style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD32F2F), // Cor vermelha amigável
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Verifique: /data/data/com.angomovie.angomovie_iptv/app_flutter/crash_log.txt',
-                    style: TextStyle(
-                      color: Colors.grey[400],
-                      fontSize: 12,
+                  const SizedBox(height: 24),
+                  
+                  const Text(
+                    'Caminho físico do ficheiro de depuração:',
+                    style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  SelectableText(
+                    _dynamicLogPath,
+                    style: const TextStyle(
+                      color: Colors.grey,
+                      fontSize: 10,
+                      fontStyle: FontStyle.italic,
                     ),
                     textAlign: TextAlign.center,
                   ),
