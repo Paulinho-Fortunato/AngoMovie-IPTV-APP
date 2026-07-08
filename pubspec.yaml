@@ -7,42 +7,26 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+dependencies:
   flutter:
     sdk: flutter
 
-  # Universal Video Player Engine (Decodifica áudio Dolby AC-3, E-AC-3, DTS e vídeos .ts)
   flutter_vlc_player: ^7.4.1
-
-  # HTTP & Networking
   http: ^1.2.0
-
-  # Local Storage (Rápido e Cacheado)
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-
-  # State Management (Reatividade na UI)
   provider: ^6.1.2
-
-  # Image Loading (Cache inteligente de logotipos em RAM/Disco)
   cached_network_image: ^3.4.1
-
-  # Shared Preferences (Definições de Usuário e Segurança)
   shared_preferences: ^2.3.2
-
-  # Android Intents (Para abrir canais no VLC ou MX Player externo)
   android_intent_plus: ^5.0.2
-
-  # Connectivity (Monitoramento de estado da rede)
   connectivity_plus: ^6.1.4
-
-  # Wakelock (Impede que a TV ou Telemóvel desligue o ecrã durante a reprodução)
   wakelock_plus: ^1.2.8
-
-  # Path Provider (Para logs físicos de depuração e caminhos de arquivo)
   path_provider: ^2.1.1
-
-  # Icons
   cupertino_icons: ^1.0.8
+
+  # NOVAS DEPENDÊNCIAS PARA ATUALIZAÇÃO OTA
+  package_info_plus: ^8.1.2  # Lê a versão atual do app automaticamente
+  url_launcher: ^6.3.1       # Abre o navegador para download do APK
 
 dev_dependencies:
   flutter_test:
