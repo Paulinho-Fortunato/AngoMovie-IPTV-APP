@@ -1,3 +1,4 @@
+// lib/screens/home_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -6,7 +7,7 @@ import '../utils/app_colors.dart';
 import '../models/channel.dart';
 import '../widgets/channel_card.dart';
 import '../widgets/featured_channel.dart';
-import '../widgets/search_bar_widget.dart'; // Importação da Barra de Pesquisa Otimizada
+import '../widgets/search_bar_widget.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'privacy_screen.dart';
@@ -43,7 +44,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Rotaciona o canal em destaque a cada 15 segundos entre todos os canais
   void _startFeaturedRotation() {
     _featuredRotationTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       final provider = context.read<ChannelProvider>();
@@ -130,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisAlignment: Main => MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.signal_wifi_bad, size: 64, color: AppColors.error),
                     const SizedBox(height: 16),
@@ -152,7 +152,6 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
 
-          // Resultados de Pesquisa Ativos
           if (_isSearchExpanded && _searchController.text.isNotEmpty) {
             return _buildSearchResults(provider.filteredChannels);
           }
@@ -196,7 +195,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               children: [
                 if (!_isSearchExpanded) ...[
-                  // Menu Hambúrguer (Apenas se não estiver buscando)
                   Builder(
                     builder: (context) => IconButton(
                       icon: const Icon(Icons.menu, color: AppColors.white),
@@ -204,7 +202,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // Logotipo Principal
                   const Text(
                     'ANGOMOVIE',
                     style: TextStyle(
@@ -217,11 +214,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Spacer(),
                 ],
                 
-                // BARRA DE PESQUISA INTELIGENTE (Se expande suavemente)
                 Expanded(
                   flex: _isSearchExpanded ? 1 : 0,
                   child: SizedBox(
-                    width: _isSearchExpanded ? null : 44, // Vira botão quando fechada
+                    width: _isSearchExpanded ? null : 44,
                     child: SearchBarWidget(
                       controller: _searchController,
                       isExpanded: _isSearchExpanded,
@@ -244,7 +240,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 
                 const SizedBox(width: 8),
 
-                // Botões do AppBar (Ocultados ao buscar para evitar RenderFlex Overflows)
                 if (!_isSearchExpanded) ...[
                   IconButton(
                     icon: const Icon(Icons.refresh, color: AppColors.white, size: 22),
@@ -307,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Navigator.pop(context);
               Navigator.push(
                 context, 
-                MaterialPageRoute(builder: (_) => const PrivacyScreen(isGateMode: false)) // Modo Leitura Segura
+                MaterialPageRoute(builder: (_) => const PrivacyScreen(isGateMode: false))
               );
             }),
             const Spacer(),
@@ -339,7 +334,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final categories = provider.categorizedChannels.keys.toList();
     final allChannels = provider.allChannels;
 
-    // Seleciona dinamicamente o canal de Destaque baseado no Timer rotativo
     Channel? currentFeatured;
     if (allChannels.isNotEmpty) {
       currentFeatured = allChannels[_featuredIndex % allChannels.length];
@@ -348,18 +342,16 @@ class _HomeScreenState extends State<HomeScreen> {
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
-        // Canal de Destaque com efeito de transição de rotação e favoritos integrado
         if (currentFeatured != null)
           SliverToBoxAdapter(
             key: ValueKey('featured_${currentFeatured.id}'),
             child: FeaturedChannelWidget(
               channel: currentFeatured,
               onPlay: () => _openPlayer(currentFeatured!),
-              onFavoriteToggle: () => provider.toggleFavorite(currentFeatured!), // Reatividade ativada!
+              onFavoriteToggle: () => provider.toggleFavorite(currentFeatured!),
             ),
           ),
 
-        // RENDERIZAÇÃO EM LISTA PREGUIÇOSA (SLIVERLIST): Alta performance para mais de 100 categorias
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
@@ -376,8 +368,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.only(left: 24, right: 24, top: 28, bottom: 10),
                     child: Text(
                       category,
-                      style: const TextStyle(
-                        color: AppColors.white,
+                      style: TextStyle(
+                        // Se for a categoria virtual de Favoritos, ganha uma cor dourada de destaque
+                        color: category == '★ Favoritos' ? Colors.amber.shade400 : AppColors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 0.5,
@@ -394,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         final channel = channels[itemIndex];
                         return ChannelCard(
                           channel: channel,
-                          width: 120, // LARGURA FIXA: Mantém tamanho constante nas listas horizontais
+                          width: 120, // Mantém tamanho fixo nas categorias horizontais
                           onTap: () => _openPlayer(channel),
                         );
                       },
@@ -435,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              childAspectRatio: 1.1, // Formato quadrado compacto perfeito para os cartões otimizados
+              childAspectRatio: 1.1,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
             ),
@@ -443,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               return ChannelCard(
                 channel: channels[index],
-                // SEM LARGURA DEFINIDA: Permite que o cartão se adapte e preencha a grade perfeitamente
+                // Deixa a largura fluida para se auto-ajustar à grade de busca
                 onTap: () => _openPlayer(channels[index]),
               );
             },
