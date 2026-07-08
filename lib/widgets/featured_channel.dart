@@ -1,5 +1,7 @@
-import 'dart:ui'; // Necessário para usar ImageFilter (Efeito Blur)
+// lib/widgets/featured_channel.dart
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/channel.dart';
 import '../utils/app_colors.dart';
@@ -7,7 +9,7 @@ import '../utils/app_colors.dart';
 class FeaturedChannelWidget extends StatelessWidget {
   final Channel channel;
   final VoidCallback onPlay;
-  final VoidCallback onFavoriteToggle; // Novo callback para favoritar diretamente no banner
+  final VoidCallback onFavoriteToggle;
 
   const FeaturedChannelWidget({
     super.key,
@@ -21,37 +23,30 @@ class FeaturedChannelWidget extends StatelessWidget {
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Container(
-      // Limita a altura do banner para evitar exageros em ecrãs muito grandes (Tablets / Dobráveis)
       constraints: BoxConstraints(
         maxHeight: screenHeight * 0.55 > 450 ? 450 : screenHeight * 0.55,
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // CAMADA 1: Fundo Desfocado Ambiental (Glassmorphism Glow)
           if (channel.logoUrl.isNotEmpty)
-            ClipRect( // Impede que o efeito de desfoque transborde para fora do banner
+            ClipRect(
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   CachedNetworkImage(
                     imageUrl: channel.logoUrl,
                     fit: BoxFit.cover,
-                    
-                    // PERFORMANCE EXTREMA: Como o fundo é totalmente desfocado, 
-                    // usar uma resolução baixíssima economiza até 95% de memória RAM!
                     memCacheWidth: 150, 
                     memCacheHeight: 150,
-                    
                     errorWidget: (_, __, ___) => Container(color: AppColors.background),
                     placeholder: (_, __) => Container(color: AppColors.background),
                   ),
-                  // Desfoque Gaussiano real por cima da imagem
                   Positioned.fill(
                     child: BackdropFilter(
                       filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                       child: Container(
-                        color: Colors.black.withValues(alpha: 0.45), // Escurece o brilho de fundo
+                        color: Colors.black.withValues(alpha: 0.45),
                       ),
                     ),
                   ),
@@ -69,7 +64,6 @@ class FeaturedChannelWidget extends StatelessWidget {
               ),
             ),
 
-          // CAMADA 2: Sobreposição de Degradê Cinematográfico (Garante contraste e legibilidade das informações)
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -79,14 +73,13 @@ class FeaturedChannelWidget extends StatelessWidget {
                   Colors.transparent,
                   Color(0x33000000),
                   Color(0xCC000000),
-                  Color(0xFF060E1A), // Transiciona suavemente para a cor de fundo do app
+                  Color(0xFF060E1A),
                 ],
                 stops: [0.0, 0.4, 0.8, 1.0],
               ),
             ),
           ),
 
-          // CAMADA 3: Conteúdo e Botões de Ação
           Positioned(
             bottom: 0,
             left: 0,
@@ -96,7 +89,6 @@ class FeaturedChannelWidget extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Logotipo Pequeno do Canal em Destaque
                   if (channel.logoUrl.isNotEmpty)
                     Container(
                       width: 85,
@@ -114,7 +106,7 @@ class FeaturedChannelWidget extends StatelessWidget {
                         child: CachedNetworkImage(
                           imageUrl: channel.logoUrl,
                           fit: BoxFit.contain,
-                          memCacheWidth: 150, // Limita RAM da miniatura
+                          memCacheWidth: 150,
                           memCacheHeight: 150,
                           errorWidget: (_, __, ___) => const Icon(
                             Icons.tv_outlined,
@@ -127,7 +119,6 @@ class FeaturedChannelWidget extends StatelessWidget {
 
                   const SizedBox(height: 16),
 
-                  // Tag de Categoria com Visual Premium
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
@@ -148,7 +139,6 @@ class FeaturedChannelWidget extends StatelessWidget {
 
                   const SizedBox(height: 10),
 
-                  // Nome do Canal com Sombra Projetada
                   Text(
                     channel.name,
                     maxLines: 2,
@@ -164,7 +154,6 @@ class FeaturedChannelWidget extends StatelessWidget {
                     ),
                   ),
 
-                  // Indicador de Fluxo HTTP Inseguro
                   if (channel.isHttpStream)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -190,65 +179,56 @@ class FeaturedChannelWidget extends StatelessWidget {
 
                   const SizedBox(height: 24),
 
-                  // Botões de Interação (Assistir & Favoritar)
+                  // BOTÕES INTERATIVOS (Envoltos no sistema de foco da TV)
                   Row(
                     children: [
-                      // Botão: Assistir Agora (Principal)
-                      ElevatedButton.icon(
-                        onPressed: onPlay,
-                        icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                        label: const Text(
-                          'ASSISTIR AGORA',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            letterSpacing: 0.5,
+                      _TVButtonWrapper(
+                        onTap: onPlay,
+                        child: ElevatedButton.icon(
+                          onPressed: onPlay,
+                          icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                          label: const Text(
+                            'ASSISTIR AGORA',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 0.5),
                           ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: AppColors.white,
-                          elevation: 3,
-                          shadowColor: AppColors.accent.withValues(alpha: 0.4),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            foregroundColor: AppColors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
                       ),
 
                       const SizedBox(width: 12),
 
-                      // Botão: Favoritar (Reativo e Dinâmico)
-                      OutlinedButton.icon(
-                        onPressed: onFavoriteToggle,
-                        icon: Icon(
-                          channel.isFavorite ? Icons.favorite : Icons.favorite_border_rounded,
-                          color: channel.isFavorite ? Colors.redAccent.shade400 : AppColors.white,
-                          size: 18,
-                        ),
-                        label: Text(
-                          channel.isFavorite ? 'FAVORITO' : 'FAVORITAR',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            letterSpacing: 0.5,
+                      _TVButtonWrapper(
+                        onTap: onFavoriteToggle,
+                        child: OutlinedButton.icon(
+                          onPressed: onFavoriteToggle,
+                          icon: Icon(
+                            channel.isFavorite ? Icons.favorite : Icons.favorite_border_rounded,
+                            color: channel.isFavorite ? Colors.redAccent.shade400 : AppColors.white,
+                            size: 18,
                           ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.white,
-                          side: BorderSide(
-                            color: channel.isFavorite 
-                              ? Colors.redAccent.shade400.withValues(alpha: 0.5) 
-                              : AppColors.white.withValues(alpha: 0.4),
-                            width: 1.5,
+                          label: Text(
+                            channel.isFavorite ? 'FAVORITO' : 'FAVORITAR',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5),
                           ),
-                          backgroundColor: channel.isFavorite 
-                            ? Colors.redAccent.shade400.withValues(alpha: 0.05) 
-                            : Colors.transparent,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.white,
+                            side: BorderSide(
+                              color: channel.isFavorite 
+                                ? Colors.redAccent.shade400.withValues(alpha: 0.5) 
+                                : AppColors.white.withValues(alpha: 0.4),
+                              width: 1.5,
+                            ),
+                            backgroundColor: channel.isFavorite 
+                              ? Colors.redAccent.shade400.withValues(alpha: 0.05) 
+                              : Colors.transparent,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
                       ),
@@ -259,6 +239,60 @@ class FeaturedChannelWidget extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Envoltório de Foco Inteligente para garantir navegação fluida de controle remoto
+class _TVButtonWrapper extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+
+  const _TVButtonWrapper({required this.child, required this.onTap});
+
+  @override
+  State<_TVButtonWrapper> createState() => _TVButtonWrapperState();
+}
+
+class _TVButtonWrapperState extends State<_TVButtonWrapper> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (focus) => setState(() => _isFocused = focus),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.select ||
+              key == LogicalKeyboardKey.space) {
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: AnimatedScale(
+        scale: _isFocused ? 1.08 : 1.0,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeInOut,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.45),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    )
+                  ]
+                : [],
+          ),
+          child: widget.child,
+        ),
       ),
     );
   }
