@@ -1,3 +1,4 @@
+// lib/screens/privacy_screen.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/app_colors.dart';
@@ -212,7 +213,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     required String text,
   }) {
     return Padding(
-      padding: const EdgeInsets.bottom(24),
+      // CORREÇÃO DA DIRETIVA DE PADDING DE ENTRADA DO FLUTTER
+      padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
