@@ -24,13 +24,16 @@ class ChannelAdapter extends TypeAdapter<Channel> {
       groupTitle: fields[4] as String,
       tvgId: fields[5] as String?,
       isHttpStream: fields[6] as bool,
+      // MIGRAÇÃO SEGURA: Se o utilizador tiver uma versão antiga do app,
+      // o campo 7 será nulo. O operador '?? false' evita o crash!
+      isFavorite: (fields[7] as bool?) ?? false,
     );
   }
 
   @override
   void write(BinaryWriter writer, Channel obj) {
     writer
-      ..writeByte(7)
+      ..writeByte(8) // Agora escrevemos 8 campos no total (0 a 7)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -44,7 +47,9 @@ class ChannelAdapter extends TypeAdapter<Channel> {
       ..writeByte(5)
       ..write(obj.tvgId)
       ..writeByte(6)
-      ..write(obj.isHttpStream);
+      ..write(obj.isHttpStream)
+      ..writeByte(7) // Novo slot mapeado para Favoritos
+      ..write(obj.isFavorite);
   }
 
   @override
