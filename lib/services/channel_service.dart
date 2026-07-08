@@ -1,17 +1,20 @@
+// lib/services/channel_service.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
-import 'm3u_parser.dart';
+import 'm3u_parser_worker.dart'; // Importação do Isolate Worker
 
 class ChannelService {
-  // Lista M3U principal do utilizador
   static const String _defaultM3uUrl =
       'https://raw.githubusercontent.com/Paulinho-Fortunato/Segundalista/refs/heads/main/z.m3u';
   static const String _m3uPrefKey = 'm3u_url';
   static const String _lastFetchKey = 'last_fetch_time';
+  
+  // Chave de Preferência para ocultar ou exibir Filmes/Séries
+  static const String _hideVodPrefKey = 'hide_vod_streams';
 
   static Box<Channel>? _channelBox;
   static Box<dynamic>? _metaBox;
@@ -23,6 +26,18 @@ class ChannelService {
     }
     _channelBox = await Hive.openBox<Channel>('channels');
     _metaBox = await Hive.openBox('channel_meta');
+  }
+
+  /// Retorna se o utilizador deseja ocultar filmes e séries (Default: false = MOSTRAR TUDO)
+  static Future<bool> getHideVod() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_hideVodPrefKey) ?? false;
+  }
+
+  /// Salva a preferência de ocultar/mostrar VOD
+  static Future<void> setHideVod(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_hideVodPrefKey, value);
   }
 
   /// Retorna o link M3U configurado ou o padrão
@@ -66,22 +81,24 @@ class ChannelService {
       return box.values.toList();
     }
 
-    // Se forçar atualização ou o cache estiver limpo, busca na nuvem
     return await _fetchFromRemote();
   }
 
-  /// Efetua o download e parseamento ultra-veloz da lista remota
+  /// Efetua o download e parseamento ultra-veloz da lista remota em Isolate
   static Future<List<Channel>> _fetchFromRemote() async {
     try {
       final m3uUrl = await getM3uUrl();
+      final hideVod = await getHideVod(); // Lê a preferência do utilizador
 
-      if (kDebugMode) debugPrint('📡 Conectando com o servidor de IPTV: $m3uUrl');
+      if (kDebugMode) {
+        debugPrint('📡 Conectando ao servidor. Filtro de VOD Ativado: $hideVod');
+      }
 
       final response = await http.get(
         Uri.parse(m3uUrl),
         headers: {
           'User-Agent': 'AngoMovie/1.2.0 Android',
-          'Accept-Encoding': 'gzip, deflate', // Solicita compactação para economizar dados
+          'Accept-Encoding': 'gzip, deflate',
           'Accept': '*/*',
         },
       ).timeout(const Duration(seconds: 25));
@@ -93,10 +110,10 @@ class ChannelService {
           throw Exception('O arquivo M3U obtido está vazio.');
         }
 
-        // Parse inteligente da lista de canais
-        final entries = M3uParser.parseToMap(m3uContent);
+        // INTEGRADO: Chama o Isolate Worker em segundo plano enviando a preferência
+        final entries = await parseM3uInIsolate(m3uContent, ignoreVod: hideVod);
         
-        // UX PRESERVADA: Descobre canais que já estavam marcados como favoritos
+        // UX PRESERVADA: Resgata canais que já estavam favoritados
         final currentBox = _channelBox ?? await Hive.openBox<Channel>('channels');
         final Set<String> favoriteIds = currentBox.values
             .where((c) => c.isFavorite)
@@ -109,12 +126,10 @@ class ChannelService {
         for (final entry in entries) {
           final ch = Channel.fromM3uEntry(entry);
           
-          // Reatribui o status de favorito caso esse canal já fosse favoritado anteriormente
           if (favoriteIds.contains(ch.id)) {
             ch.isFavorite = true;
           }
 
-          // Agrupa metadados do VLC para gravação otimizada em lote posterior
           final meta = <String, String>{};
           entry.forEach((k, v) {
             if (k.startsWith('vlc-')) meta[k] = v;
@@ -127,65 +142,52 @@ class ChannelService {
         }
 
         if (channels.isEmpty) {
-          throw Exception('Não foi possível identificar canais válidos neste arquivo M3U.');
+          throw Exception('Nenhum canal compatível encontrado na sua lista.');
         }
 
-        // SALVAMENTO EM LOTE (BATCH WRITE): Grava toda a metadata de uma vez só
+        // Escrita ultra veloz em lote de metadados
         if (batchMeta.isNotEmpty) {
           final metaBox = _metaBox ?? await Hive.openBox('channel_meta');
           await metaBox.putAll(batchMeta);
         }
 
         if (kDebugMode) {
-          debugPrint('📊 Parseamento finalizado com sucesso. ${channels.length} canais estruturados.');
+          debugPrint('📊 Parseamento finalizado. ${channels.length} conteúdos estruturados.');
         }
 
-        // Grava no cache de canais principal
         await _saveToCache(channels);
         return channels;
       } else {
-        throw Exception('Servidor respondeu com erro HTTP ${response.statusCode}');
+        throw Exception('Servidor IPTV respondeu com erro HTTP ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('❌ Erro no sincronismo de rede: $e');
 
-      // Se falhar o download de rede (ex: Sem Internet), retorna o cache local de fallback de forma segura
+      // Fallback seguro em caso de falha de conexão
       final box = _channelBox ?? await Hive.openBox<Channel>('channels');
       if (box.isNotEmpty) {
-        if (kDebugMode) {
-          debugPrint('💾 Internet offline. Fallback ativado: ${box.length} canais carregados do cache.');
-        }
         return box.values.toList();
       }
-
       rethrow;
     }
   }
 
-  /// Grava a lista completa no banco de dados usando escrita otimizada em Lote (Batch Transaction)
+  /// Grava no disco em uma única transação rápida (Batch Write)
   static Future<void> _saveToCache(List<Channel> channels) async {
     final box = _channelBox ?? await Hive.openBox<Channel>('channels');
-    
-    // Limpa a base antiga de forma veloz
     await box.clear();
 
-    // PERFORMANCE: Cria um mapa chave-valor para salvar todos os canais de uma única vez no disco
     final Map<String, Channel> batchMap = {
       for (final channel in channels) channel.id: channel
     };
 
-    // Apenas uma escrita de I/O em lote na memória física
     await box.putAll(batchMap);
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_lastFetchKey, DateTime.now().millisecondsSinceEpoch);
-    
-    if (kDebugMode) {
-      debugPrint('💾 Cache sincronizado: ${channels.length} canais gravados em lote.');
-    }
   }
 
-  /// Remove o cache local de canais e metadados
+  /// Limpa toda a base de dados
   static Future<void> clearCache() async {
     final box = _channelBox ?? await Hive.openBox<Channel>('channels');
     await box.clear();
@@ -195,7 +197,5 @@ class ChannelService {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_lastFetchKey);
-    
-    if (kDebugMode) debugPrint('🗑️ Base de dados limpa com sucesso.');
   }
 }
