@@ -1,3 +1,4 @@
+// lib/providers/channel_provider.dart
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:isolate';
@@ -15,12 +16,10 @@ class ChannelProvider extends ChangeNotifier {
   String _searchQuery = '';
   Channel? _featuredChannel;
   
-  // Controle de Lazy Loading de Alta Performance
   int _loadedCategoriesCount = 0;
   int _categoriesPerBatch = 6; 
   Timer? _categoryLoadTimer;
 
-  // Getters Públicos
   List<Channel> get allChannels => _allChannels;
   List<Channel> get filteredChannels => _searchQuery.isEmpty ? _allChannels : _filteredChannels;
   Map<String, List<Channel>> get categorizedChannels => _categorizedChannels;
@@ -32,7 +31,7 @@ class ChannelProvider extends ChangeNotifier {
   bool get hasData => _allChannels.isNotEmpty;
   int get loadedCategoriesCount => _loadedCategoriesCount;
 
-  /// Carrega os canais usando Isolates reais para tarefas pesadas e categorização O(N)
+  /// Carrega os canais com Isolates e cria a categoria virtual de favoritos no topo
   Future<void> loadChannels({bool forceRefresh = false}) async {
     if (_state == LoadingState.loading) return;
     
@@ -44,15 +43,11 @@ class ChannelProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Carrega os canais (Se for leitura local do Hive, é instantâneo na main thread. 
-      // Se for download/parse de M3U pesado, o Isolate real é invocado)
       final channels = await _loadChannelsSecure(forceRefresh);
-      
       _allChannels = channels;
       _featuredChannel = channels.isNotEmpty ? channels.first : null;
       
       if (channels.isNotEmpty) {
-        // 2. Prepara o lazy loading de categorias com performance O(N)
         _startLazyCategoryLoading(channels);
       }
       
@@ -70,49 +65,48 @@ class ChannelProvider extends ChangeNotifier {
 
   /// Gerenciamento inteligente de Isolates para evitar bloqueios de UI
   Future<List<Channel>> _loadChannelsSecure(bool forceRefresh) async {
-    // Se não for forçar atualização, tenta carregar do cache local (rápido, main thread)
     if (!forceRefresh) {
       final cached = await ChannelService.loadChannels(forceRefresh: false);
       if (cached.isNotEmpty) return cached;
     }
 
-    // Se precisar atualizar M3U externo (pesado), executa em Isolate real usando a API moderna do Dart
     try {
       return await Isolate.run<List<Channel>>(() async {
-        // Isolate.run inicializa corretamente os contextos básicos necessários
         return await ChannelService.loadChannels(forceRefresh: true);
       }).timeout(
         const Duration(seconds: 45),
-        onTimeout: () => throw TimeoutException('O carregamento da lista de canais expirou.'),
+        onTimeout: () => throw TimeoutException('O carregamento da lista expirou.'),
       );
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('⚠️ Falha no Isolate. Rodando fallback seguro na Main Thread: $e');
+        debugPrint('⚠️ Falha no Isolate. Rodando fallback na Main Thread: $e');
       }
-      // Fallback de segurança na thread principal caso o dispositivo rejeite Isolates secundários
       return await ChannelService.loadChannels(forceRefresh: forceRefresh);
     }
   }
 
-  /// Otimização Algorítmica O(N): Agrupa todos os canais por categoria em uma única passada
+  /// Otimização Algorítmica O(N) com injeção automática de Favoritos no topo
   void _startLazyCategoryLoading(List<Channel> channels) {
     _categoryLoadTimer?.cancel();
 
-    // Criação do Mapa Hash em tempo linear O(N)
     final Map<String, List<Channel>> groupedMap = {};
     for (final channel in channels) {
       final category = channel.groupTitle.isEmpty ? 'Sem Categoria' : channel.groupTitle;
       (groupedMap[category] ??= []).add(channel);
     }
 
-    // Obtém as chaves ordenadas alfabeticamente
     final sortedCategories = groupedMap.keys.toList()..sort();
 
-    // Dispara a entrega dos lotes para a UI
+    // CATEGORIA VIRTUAL: Se houver canais favoritados, coloca no topo
+    final favorites = channels.where((c) => c.isFavorite).toList();
+    if (favorites.isNotEmpty) {
+      groupedMap['★ Favoritos'] = favorites;
+      sortedCategories.insert(0, '★ Favoritos');
+    }
+
     _loadBatchOfCategories(groupedMap, sortedCategories, 0);
   }
 
-  /// Processa a entrega de lotes de forma instantânea, eliminando filtros pesados dentro do Timer
   void _loadBatchOfCategories(
     Map<String, List<Channel>> groupedChannels,
     List<String> sortedCategories,
@@ -122,14 +116,12 @@ class ChannelProvider extends ChangeNotifier {
 
     for (int i = startIndex; i < endIndex; i++) {
       final category = sortedCategories[i];
-      // A atribuição aqui é O(1) (Apenas aponta referências na memória)
       _categorizedChannels[category] = groupedChannels[category] ?? [];
       _loadedCategoriesCount++;
     }
 
     notifyListeners();
 
-    // Agenda o próximo lote com intervalo reduzido (carregamento mais veloz na tela do usuário)
     if (endIndex < sortedCategories.length) {
       _categoryLoadTimer = Timer(const Duration(milliseconds: 60), () {
         _loadBatchOfCategories(groupedChannels, sortedCategories, endIndex);
@@ -137,7 +129,34 @@ class ChannelProvider extends ChangeNotifier {
     }
   }
 
-  /// Carrega todas as categorias de uma vez caso o usuário precise (ex: Categorias do Drawer)
+  /// Alterna o estado de favoritos de forma instantânea e atualiza a categoria virtual
+  Future<void> toggleFavorite(Channel channel) async {
+    channel.isFavorite = !channel.isFavorite;
+    await channel.save(); // Salva de forma síncrona no Hive
+    
+    _updateFavoritesInMap();
+    notifyListeners();
+  }
+
+  /// Atualiza apenas a categoria virtual sem precisar reconstruir toda a estrutura do app
+  void _updateFavoritesInMap() {
+    final favorites = _allChannels.where((c) => c.isFavorite).toList();
+    
+    if (favorites.isNotEmpty) {
+      _categorizedChannels['★ Favoritos'] = favorites;
+      
+      // Garante que os favoritos apareçam na primeira posição
+      if (!_categorizedChannels.containsKey('★ Favoritos')) {
+        final Map<String, List<Channel>> tempMap = {'★ Favoritos': favorites};
+        tempMap.addAll(_categorizedChannels);
+        _categorizedChannels = tempMap;
+      }
+    } else {
+      // Se não houver nenhum favorito ativo, remove a categoria virtual do ecrã
+      _categorizedChannels.remove('★ Favoritos');
+    }
+  }
+
   void loadAllCategories() {
     if (_allChannels.isEmpty) return;
     
@@ -149,17 +168,16 @@ class ChannelProvider extends ChangeNotifier {
       (groupedMap[category] ??= []).add(channel);
     }
 
-    _categorizedChannels = groupedMap;
+    final favorites = _allChannels.where((c) => c.isFavorite).toList();
+    if (favorites.isNotEmpty) {
+      _categorizedChannels['★ Favoritos'] = favorites;
+    }
+
+    _categorizedChannels.addAll(groupedMap);
     _loadedCategoriesCount = _categorizedChannels.length;
     notifyListeners();
   }
 
-  /// Define o número de categorias carregadas por lote
-  void setCategoriesPerBatch(int n) {
-    _categoriesPerBatch = n.clamp(1, 50);
-  }
-
-  /// Pesquisa Otimizada e segura contra falhas de digitação
   void search(String query) {
     _searchQuery = query.trim();
     if (_searchQuery.isEmpty) {
