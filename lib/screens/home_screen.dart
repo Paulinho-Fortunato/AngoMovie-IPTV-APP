@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../widgets/channel_card.dart';
 import '../widgets/featured_channel.dart';
 import '../widgets/search_bar_widget.dart';
+import '../services/update_service.dart'; // Importação do serviço de atualizações OTA
 import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'privacy_screen.dart';
@@ -34,7 +35,15 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _startFeaturedRotation(); // Inicia a rotação de canais automática
+    _startFeaturedRotation(); // Inicia a rotação automática do banner
+
+    // VERIFICAÇÃO AUTOMÁTICA DE ATUALIZAÇÃO OTA (Over-The-Air)
+    // Executa silenciosamente 2 segundos após a interface carregar, sem travar o app
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        UpdateService.checkForUpdates(context);
+      }
+    });
   }
 
   void _onScroll() {
@@ -44,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Altera o canal de destaque em carrossel a cada 15 segundos de forma automática
   void _startFeaturedRotation() {
     _featuredRotationTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       final provider = context.read<ChannelProvider>();
@@ -117,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   CircularProgressIndicator(color: AppColors.accent),
                   SizedBox(height: 16),
                   Text(
-                    'Sincronizando streams...',
+                    'Sincronizando base de dados...',
                     style: TextStyle(color: AppColors.lightGray, fontWeight: FontWeight.w500),
                   ),
                 ],
@@ -130,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Column(
-                  mainAxisAlignment: Main => MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.signal_wifi_bad, size: 64, color: AppColors.error),
                     const SizedBox(height: 16),
@@ -152,6 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
 
+          // Seção de pesquisa estritamente ativa
           if (_isSearchExpanded && _searchController.text.isNotEmpty) {
             return _buildSearchResults(provider.filteredChannels);
           }
@@ -195,6 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               children: [
                 if (!_isSearchExpanded) ...[
+                  // Abre o menu lateral deslizante (Drawer)
                   Builder(
                     builder: (context) => IconButton(
                       icon: const Icon(Icons.menu, color: AppColors.white),
@@ -214,6 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Spacer(),
                 ],
                 
+                // BARRA DE PESQUISA REATIVA E ADAPTATIVA (Suporta TV e Telemóvel)
                 Expanded(
                   flex: _isSearchExpanded ? 1 : 0,
                   child: SizedBox(
@@ -342,6 +355,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
+        // Banner de Destaque no topo com suporte a favoritos reativos
         if (currentFeatured != null)
           SliverToBoxAdapter(
             key: ValueKey('featured_${currentFeatured.id}'),
@@ -352,6 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
+        // RENDERIZAÇÃO EM LISTA PREGUIÇOSA (SLIVERLIST): Suporta carregamento incremental ultra veloz
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
@@ -369,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       category,
                       style: TextStyle(
-                        // Se for a categoria virtual de Favoritos, ganha uma cor dourada de destaque
+                        // Estilização dourada especial e exclusiva para a fileira de Favoritos
                         color: category == '★ Favoritos' ? Colors.amber.shade400 : AppColors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -387,7 +402,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         final channel = channels[itemIndex];
                         return ChannelCard(
                           channel: channel,
-                          width: 120, // Mantém tamanho fixo nas categorias horizontais
+                          width: 120, // Largura constante para as listas deslizantes horizontais
                           onTap: () => _openPlayer(channel),
                         );
                       },
@@ -436,7 +451,7 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               return ChannelCard(
                 channel: channels[index],
-                // Deixa a largura fluida para se auto-ajustar à grade de busca
+                // Sem largura definida: Permite que o cartão se expanda e preencha a grade perfeitamente
                 onTap: () => _openPlayer(channels[index]),
               );
             },
