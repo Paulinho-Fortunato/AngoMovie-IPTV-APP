@@ -2,12 +2,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
-import 'package:video_player/video_player.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart'; // Nova engine profissional
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/channel.dart';
 import '../utils/app_colors.dart';
 import '../services/channel_service.dart';
+import '../services/external_player_service.dart';
 
 enum AspectRatioMode { fit, stretch, zoom }
 
@@ -21,7 +21,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMixin {
-  VideoPlayerController? _controller;
+  VlcPlayerController? _controller; // Controller atualizado para VLC
   
   bool _isControlsVisible = true;
   bool _hasError = false;
@@ -32,7 +32,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   late AnimationController _controlsAnimController;
   late Animation<double> _controlsAnimation;
 
-  // Modos de Visualização e Gestos
+  // Gestos e Formato
   AspectRatioMode _aspectRatioMode = AspectRatioMode.fit;
   double _volumeValue = 0.5;      
   double _brightnessValue = 0.5;  
@@ -40,7 +40,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   bool _showBrightnessIndicator = false;
   Timer? _indicatorTimer;
 
-  // Inteligência de Conteúdo: Detecta se é transmissão ao vivo ou arquivo VOD
+  // Detecção Inteligente de TV ao Vivo vs Cinema VOD
   bool get _isLiveStream {
     final title = widget.channel.groupTitle.toLowerCase();
     return !title.contains('vod') &&
@@ -75,7 +75,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     if (_controller != null) {
       _controller!.removeListener(_onPlayerStateChanged);
       try {
-        await _controller!.pause();
+        await _controller!.stop();
       } catch (_) {}
       await _controller!.dispose();
       _controller = null;
@@ -92,50 +92,41 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     try {
-      final uri = Uri.parse(widget.channel.streamUrl);
       final meta = await ChannelService.getChannelMeta(widget.channel.id);
-      final headers = <String, String>{};
+      final List<String> vlcOptions = [
+        '--http-user-agent=VLC/3.0.18 LibVLC/3.0.18', // User-Agent universal compatível
+        '--network-caching=3000',                     // Buffer de rede de 3s contra travamentos
+        '--rtsp-tcp',                                 // Força tráfego RTP sobre TCP
+        '--drop-late-frames',                         // Ignora frames atrasados para manter áudio sincronizado
+        '--skip-frames',
+      ];
 
-      headers['User-Agent'] = 'AngoMovie/1.2.0 Android';
-
-      if (meta.containsKey('vlc-http-user-agent')) {
-        headers['User-Agent'] = meta['vlc-http-user-agent']!;
-      }
+      // Aplica cabeçalhos VLC do M3U se existirem
       if (meta.containsKey('vlc-http-referrer')) {
-        headers['Referer'] = meta['vlc-http-referrer']!;
-      }
-      if (meta.containsKey('vlc-http-origin')) {
-        headers['Origin'] = meta['vlc-http-origin']!;
+        vlcOptions.add('--http-referrer=${meta['vlc-http-referrer']}');
       }
 
-      if (!mounted) return;
-
-      final controller = VideoPlayerController.networkUrl(
-        uri,
-        httpHeaders: headers,
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: false,
-          allowBackgroundPlayback: false,
+      final controller = VlcPlayerController.network(
+        widget.channel.streamUrl,
+        hwAcc: HwAcc.full, // Ativa aceleração por Hardware máxima da GPU
+        autoPlay: true,
+        options: VlcPlayerOptions(
+          advanced: VlcAdvancedOptions(vlcOptions),
+          http: VlcHttpOptions([
+            '--http-user-agent=VLC/3.0.18 LibVLC/3.0.18',
+          ]),
         ),
       );
 
       _controller = controller;
-      await controller.initialize();
-
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-
+      _controller!.addListener(_onPlayerStateChanged);
       setState(() {});
-      await controller.play();
-      controller.addListener(_onPlayerStateChanged);
       
     } catch (e) {
       if (mounted) {
         setState(() {
           _hasError = true;
-          _errorMessage = 'Erro ao conectar ao servidor de streaming.';
+          _errorMessage = 'Falha crítica ao carregar a engine VLC.';
         });
       }
     }
@@ -144,22 +135,26 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   void _onPlayerStateChanged() {
     if (_controller == null || !mounted) return;
 
-    if (_controller!.value.hasError) {
+    final value = _controller!.value;
+
+    // Detecta erros do player
+    if (value.hasError) {
       setState(() {
         _hasError = true;
-        _errorMessage = 'O sinal do canal foi interrompido.';
+        _errorMessage = value.errorDescription ?? 'Erro desconhecido na transmissão de rede.';
       });
       return;
     }
 
-    final isBuffering = _controller!.value.isBuffering;
+    // Monitora o estado de Buffer
+    final isBuffering = value.playingState == PlayingState.buffering;
     if (isBuffering != _isBuffering) {
       setState(() {
         _isBuffering = isBuffering;
       });
     }
 
-    // Se for VOD, reconstrói o ecrã constantemente para atualizar a Timeline
+    // Atualiza a barra de progresso em tempo real se for VOD
     if (!_isLiveStream) {
       setState(() {});
     }
@@ -189,8 +184,8 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   }
 
   void _togglePlayPause() {
-    if (_isLiveStream) return; // TV Ao vivo não pode ser pausada/avançada
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_isLiveStream) return;
+    if (_controller == null) return;
     
     setState(() {
       if (_controller!.value.isPlaying) {
@@ -202,18 +197,16 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     _scheduleHideControls();
   }
 
-  // Avança o vídeo em 10 segundos (VOD)
   void _fastForward() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_controller == null) return;
     final currentPosition = _controller!.value.position;
     final targetPosition = currentPosition + const Duration(seconds: 10);
     _controller!.seekTo(targetPosition);
     _scheduleHideControls();
   }
 
-  // Recua o vídeo em 10 segundos (VOD)
   void _rewind() {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_controller == null) return;
     final currentPosition = _controller!.value.position;
     final targetPosition = currentPosition - const Duration(seconds: 10);
     _controller!.seekTo(targetPosition);
@@ -240,7 +233,8 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
         _showVolumeIndicator = false;
       } else {
         _volumeValue = (_volumeValue + dragDelta).clamp(0.0, 1.0);
-        _controller?.setVolume(_volumeValue);
+        // O volume do VLC é de 0 a 100 inteiros
+        _controller?.setVolume((_volumeValue * 100).toInt());
         _showVolumeIndicator = true;
         _showBrightnessIndicator = false;
       }
@@ -255,7 +249,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     });
   }
 
-  // Converte tempos de milissegundos para formatação amigável (01:23:45)
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     final hours = duration.inHours;
@@ -279,21 +272,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   }
 
   @override
-  void dispose() {
-    _hideControlsTimer?.cancel();
-    _indicatorTimer?.cancel();
-    _disposeController();
-    _controlsAnimController.dispose();
-    WakelockPlus.disable();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
@@ -302,14 +280,14 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _toggleControls,
-        onDoubleTap: _isLiveStream ? null : _togglePlayPause, // Toque duplo desativado na TV ao Vivo
+        onDoubleTap: _isLiveStream ? null : _togglePlayPause,
         onVerticalDragUpdate: (details) => _handleVerticalDragUpdate(details, size.width),
         child: Stack(
           children: [
             Center(
               child: _hasError
                   ? _buildErrorScreen()
-                  : _controller?.value.isInitialized == true
+                  : _controller != null
                       ? _buildVideoPlayerWrapper()
                       : const Center(
                           child: Column(
@@ -318,7 +296,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                               CircularProgressIndicator(color: AppColors.accent),
                               SizedBox(height: 16),
                               Text(
-                                'Conectando ao stream...',
+                                'Conectando à engine VLC decoders...',
                                 style: TextStyle(color: AppColors.lightGray),
                               ),
                             ],
@@ -326,7 +304,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                         ),
             ),
 
-            if (_isBuffering && !_hasError && _controller?.value.isInitialized == true)
+            if (_isBuffering && !_hasError && _controller != null)
               Center(
                 child: Container(
                   padding: const EdgeInsets.all(16),
@@ -362,27 +340,37 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   }
 
   Widget _buildVideoPlayerWrapper() {
-    final videoValue = _controller!.value;
-
     switch (_aspectRatioMode) {
       case AspectRatioMode.stretch:
-        return SizedBox.expand(child: VideoPlayer(_controller!));
+        return SizedBox.expand(
+          child: VlcPlayer(
+            controller: _controller!,
+            aspectRatio: MediaQuery.of(context).size.aspectRatio,
+            placeholder: const Center(child: CircularProgressIndicator()),
+          ),
+        );
       case AspectRatioMode.zoom:
         return SizedBox.expand(
           child: FittedBox(
             fit: BoxFit.cover,
             child: SizedBox(
-              width: videoValue.size.width,
-              height: videoValue.size.height,
-              child: VideoPlayer(_controller!),
+              width: _controller!.value.size.width,
+              height: _controller!.value.size.height,
+              child: VlcPlayer(
+                controller: _controller!,
+                aspectRatio: _controller!.value.aspectRatio,
+              ),
             ),
           ),
         );
       case AspectRatioMode.fit:
       default:
         return AspectRatio(
-          aspectRatio: videoValue.aspectRatio,
-          child: VideoPlayer(_controller!),
+          aspectRatio: _controller!.value.aspectRatio,
+          child: VlcPlayer(
+            controller: _controller!,
+            aspectRatio: _controller!.value.aspectRatio,
+          ),
         );
     }
   }
@@ -434,7 +422,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       child: SafeArea(
         child: Column(
           children: [
-            // 1. BARRA SUPERIOR (Comun a TV e VOD)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
@@ -454,37 +441,16 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                       children: [
                         Text(
                           widget.channel.name,
-                          style: const TextStyle(
-                            color: AppColors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: const TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold),
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
                           widget.channel.groupTitle,
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12,
-                          ),
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                         ),
                       ],
                     ),
                   ),
-                  if (widget.channel.isHttpStream) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text(
-                        'HTTP',
-                        style: TextStyle(color: AppColors.warning, fontSize: 11),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
                   _TVControlWrapper(
                     onTap: () {},
                     child: IconButton(
@@ -498,15 +464,13 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               ),
             ),
 
-            // 2. PAINEL CENTRAL (Dinâmico: TV vs VOD)
             Expanded(
               child: Center(
                 child: _isLiveStream
-                    ? const SizedBox.shrink() // TV Ao Vivo não tem botões de reprodução centralizados
+                    ? const SizedBox.shrink()
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Botão: Recuar 10 segundos
                           _TVControlWrapper(
                             onTap: _rewind,
                             child: IconButton(
@@ -516,8 +480,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                             ),
                           ),
                           const SizedBox(width: 24),
-                          
-                          // Botão: Play/Pause Central
                           _TVControlWrapper(
                             onTap: _togglePlayPause,
                             child: Container(
@@ -538,8 +500,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                             ),
                           ),
                           const SizedBox(width: 24),
-
-                          // Botão: Avançar 10 segundos
                           _TVControlWrapper(
                             onTap: _fastForward,
                             child: IconButton(
@@ -553,14 +513,12 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               ),
             ),
 
-            // 3. BARRA INFERIOR (Dinâmica: TV vs VOD)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Timeline/Progresso interativo (Apenas se for VOD)
-                  if (!_isLiveStream && _controller != null && _controller!.value.isInitialized) ...[
+                  if (!_isLiveStream && _controller != null) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Row(
@@ -581,8 +539,15 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                                   thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                                 ),
                                 child: Slider(
-                                  value: _controller!.value.position.inSeconds.toDouble(),
-                                  max: _controller!.value.duration.inSeconds.toDouble(),
+                                  value: _controller!.value.position.inSeconds.toDouble().clamp(
+                                    0.0, 
+                                    _controller!.value.duration.inSeconds.toDouble() == 0.0 
+                                      ? 1.0 
+                                      : _controller!.value.duration.inSeconds.toDouble()
+                                  ),
+                                  max: _controller!.value.duration.inSeconds.toDouble() == 0.0 
+                                      ? 1.0 
+                                      : _controller!.value.duration.inSeconds.toDouble(),
                                   onChanged: (value) {
                                     _controller!.seekTo(Duration(seconds: value.toInt()));
                                     _scheduleHideControls();
@@ -602,11 +567,8 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
                   Row(
                     children: [
-                      // Badge de Identificação
                       _buildBadge(),
                       const Spacer(),
-                      
-                      // Ajuste de Enquadramento do Ecrã
                       _TVControlWrapper(
                         onTap: _cycleAspectRatio,
                         child: IconButton(
@@ -620,7 +582,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                             size: 24,
                           ),
                           onPressed: _cycleAspectRatio,
-                          tooltip: 'Formato do Ecrã',
                         ),
                       ),
                     ],
@@ -634,7 +595,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     );
   }
 
-  // Constrói o Badge identificador inferior (AO VIVO ou VOD)
   Widget _buildBadge() {
     if (_isLiveStream) {
       return Container(
@@ -656,12 +616,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
             SizedBox(width: 6),
             Text(
               'AO VIVO',
-              style: TextStyle(
-                color: AppColors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1,
-              ),
+              style: TextStyle(color: AppColors.white, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1),
             ),
           ],
         ),
@@ -676,12 +631,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
         ),
         child: const Text(
           'VOD CINEMA',
-          style: TextStyle(
-            color: AppColors.accent,
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.5,
-          ),
+          style: TextStyle(color: AppColors.accent, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5),
         ),
       );
     }
@@ -697,19 +647,75 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(Icons.signal_wifi_bad, color: AppColors.error, size: 64),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               const Text(
-                'Stream indisponível de momento',
+                'Não foi possível reproduzir este canal',
                 style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Text(
-                _errorMessage,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                'Se preferir, pode abrir o fluxo em um player externo especializado:',
+                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.7), fontSize: 12),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _TVControlWrapper(
+                    onTap: () async {
+                      final success = await ExternalPlayerService.playInVlc(widget.channel);
+                      if (!success && mounted) {
+                        _showInfoSnackBar('Instale o VLC Player na Google Play Store.');
+                      }
+                    },
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final success = await ExternalPlayerService.playInVlc(widget.channel);
+                        if (!success && mounted) {
+                          _showInfoSnackBar('Instale o VLC Player na Google Play Store.');
+                        }
+                      },
+                      icon: const Icon(Icons.play_circle_fill_rounded, size: 16),
+                      label: const Text('Abrir no VLC'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade800,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _TVControlWrapper(
+                    onTap: () async {
+                      final success = await ExternalPlayerService.playInMxPlayer(widget.channel);
+                      if (!success && mounted) {
+                        _showInfoSnackBar('Instale o MX Player na Google Play Store.');
+                      }
+                    },
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final success = await ExternalPlayerService.playInMxPlayer(widget.channel);
+                        if (!success && mounted) {
+                          _showInfoSnackBar('Instale o MX Player na Google Play Store.');
+                        }
+                      },
+                      icon: const Icon(Icons.play_circle_fill_rounded, size: 16),
+                      label: const Text('Abrir no MX Player'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade800,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
+              
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -756,9 +762,18 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       ),
     );
   }
+
+  void _showInfoSnackBar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: AppColors.background.withValues(alpha: 0.9),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 }
 
-/// Envoltório de Foco para botões do player na TV Box (Comando D-PAD)
 class _TVControlWrapper extends StatefulWidget {
   final Widget child;
   final VoidCallback onTap;
