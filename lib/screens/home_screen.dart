@@ -7,8 +7,7 @@ import '../utils/app_colors.dart';
 import '../models/channel.dart';
 import '../widgets/channel_card.dart';
 import '../widgets/featured_channel.dart';
-import '../widgets/search_bar_widget.dart';
-import '../services/update_service.dart'; // Importação do serviço de atualizações OTA
+import '../services/update_service.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'privacy_screen.dart';
@@ -26,8 +25,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isSearchExpanded = false;
   
   Timer? _debounceTimer;
-  Timer? _featuredRotationTimer; // Timer para rotacionar o destaque
-  int _featuredIndex = 0; // Índice do canal em destaque atual
+  Timer? _featuredRotationTimer;
+  int _featuredIndex = 0;
   
   final TextEditingController _searchController = TextEditingController();
 
@@ -35,11 +34,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _startFeaturedRotation(); // Inicia a rotação automática do banner
+    _startFeaturedRotation();
 
-    // VERIFICAÇÃO AUTOMÁTICA DE ATUALIZAÇÃO OTA (Over-The-Air)
-    // Executa silenciosamente 2 segundos após a interface carregar, sem travar o app
-    Future.delayed(const Duration(seconds: 2), () {
+    Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         UpdateService.checkForUpdates(context);
       }
@@ -53,7 +50,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Altera o canal de destaque em carrossel a cada 15 segundos de forma automática
   void _startFeaturedRotation() {
     _featuredRotationTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       final provider = context.read<ChannelProvider>();
@@ -162,7 +158,6 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
 
-          // Seção de pesquisa estritamente ativa
           if (_isSearchExpanded && _searchController.text.isNotEmpty) {
             return _buildSearchResults(provider.filteredChannels);
           }
@@ -203,74 +198,96 @@ class _HomeScreenState extends State<HomeScreen> {
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                if (!_isSearchExpanded) ...[
-                  // Abre o menu lateral deslizante (Drawer)
-                  Builder(
-                    builder: (context) => IconButton(
-                      icon: const Icon(Icons.menu, color: AppColors.white),
-                      onPressed: () => Scaffold.of(context).openDrawer(),
-                    ),
+            child: !_isSearchExpanded
+                ? Row(
+                    children: [
+                      Builder(
+                        builder: (context) => IconButton(
+                          icon: const Icon(Icons.menu, color: AppColors.white),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'ANGOMOVIE',
+                        style: TextStyle(
+                          color: AppColors.accent,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const Spacer(),
+                      // Botão de Pesquisa Perfeitamente Espaçoso e Funcional
+                      IconButton(
+                        icon: const Icon(Icons.search, color: AppColors.white),
+                        onPressed: () {
+                          setState(() {
+                            _isSearchExpanded = true;
+                          });
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh, color: AppColors.white),
+                        onPressed: _refreshChannels,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.settings, color: AppColors.white),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: AppColors.white),
+                        onPressed: () {
+                          setState(() {
+                            _isSearchExpanded = false;
+                            _searchController.clear();
+                          });
+                          context.read<ChannelProvider>().clearSearch();
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: AppColors.mediumGray.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: TextField(
+                            controller: _searchController,
+                            autofocus: true, // Abre o teclado na TV/Celular automaticamente
+                            onChanged: _onSearchChanged,
+                            style: const TextStyle(color: AppColors.white, fontSize: 14),
+                            decoration: const InputDecoration(
+                              hintText: 'Pesquise canais, filmes...',
+                              hintStyle: TextStyle(color: AppColors.textMuted),
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_searchController.text.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: AppColors.white),
+                          onPressed: () {
+                            _searchController.clear();
+                            context.read<ChannelProvider>().clearSearch();
+                            setState(() {});
+                          },
+                        ),
+                      ]
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'ANGOMOVIE',
-                    style: TextStyle(
-                      color: AppColors.accent,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const Spacer(),
-                ],
-                
-                // BARRA DE PESQUISA REATIVA E ADAPTATIVA (Suporta TV e Telemóvel)
-                Expanded(
-                  flex: _isSearchExpanded ? 1 : 0,
-                  child: SizedBox(
-                    width: _isSearchExpanded ? null : 44,
-                    child: SearchBarWidget(
-                      controller: _searchController,
-                      isExpanded: _isSearchExpanded,
-                      onChanged: _onSearchChanged,
-                      onTap: () {
-                        if (!_isSearchExpanded) {
-                          setState(() => _isSearchExpanded = true);
-                        }
-                      },
-                      onClose: () {
-                        setState(() {
-                          _isSearchExpanded = false;
-                          _searchController.clear();
-                        });
-                        context.read<ChannelProvider>().clearSearch();
-                      },
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(width: 8),
-
-                if (!_isSearchExpanded) ...[
-                  IconButton(
-                    icon: const Icon(Icons.refresh, color: AppColors.white, size: 22),
-                    onPressed: _refreshChannels,
-                    tooltip: 'Sincronizar Lista',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                      );
-                    },
-                    tooltip: 'Definições',
-                  ),
-                ],
-              ],
-            ),
           ),
         ),
       ),
@@ -355,7 +372,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
-        // Banner de Destaque no topo com suporte a favoritos reativos
         if (currentFeatured != null)
           SliverToBoxAdapter(
             key: ValueKey('featured_${currentFeatured.id}'),
@@ -366,7 +382,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-        // RENDERIZAÇÃO EM LISTA PREGUIÇOSA (SLIVERLIST): Suporta carregamento incremental ultra veloz
         SliverList(
           delegate: SliverChildBuilderDelegate(
             (context, index) {
@@ -384,7 +399,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       category,
                       style: TextStyle(
-                        // Estilização dourada especial e exclusiva para a fileira de Favoritos
                         color: category == '★ Favoritos' ? Colors.amber.shade400 : AppColors.white,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -402,7 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         final channel = channels[itemIndex];
                         return ChannelCard(
                           channel: channel,
-                          width: 120, // Largura constante para as listas deslizantes horizontais
+                          width: 120,
                           onTap: () => _openPlayer(channel),
                         );
                       },
@@ -451,7 +465,6 @@ class _HomeScreenState extends State<HomeScreen> {
             itemBuilder: (context, index) {
               return ChannelCard(
                 channel: channels[index],
-                // Sem largura definida: Permite que o cartão se expanda e preencha a grade perfeitamente
                 onTap: () => _openPlayer(channels[index]),
               );
             },
