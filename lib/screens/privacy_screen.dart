@@ -3,162 +3,246 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/app_colors.dart';
 import 'home_screen.dart';
 
-class PrivacyScreen extends StatelessWidget {
-  const PrivacyScreen({super.key});
+class PrivacyScreen extends StatefulWidget {
+  /// Se [isGateMode] for `true`, a tela funciona como bloqueio inicial (exige clique em aceitar).
+  /// Se for `false`, funciona como tela de consulta (com botão para voltar e sem exigir aceite).
+  final bool isGateMode;
+
+  const PrivacyScreen({
+    super.key,
+    this.isGateMode = true, // Por padrão, assume que é o bloqueio inicial
+  });
+
+  @override
+  State<PrivacyScreen> createState() => _PrivacyScreenState();
+}
+
+class _PrivacyScreenState extends State<PrivacyScreen> {
+  final ScrollController _scrollController = ScrollController();
+  bool _hasScrolledToBottom = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Se não for modo bloqueio, não precisamos monitorar o scroll
+    if (widget.isGateMode) {
+      _scrollController.addListener(_onScroll);
+    } else {
+      _hasScrolledToBottom = true;
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.offset >= _scrollController.position.maxScrollExtent - 50) {
+      if (!_hasScrolledToBottom) {
+        setState(() {
+          _hasScrolledToBottom = true;
+        });
+      }
+    }
+  }
 
   Future<void> _accept(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('privacy_accepted', true);
+    
     if (!context.mounted) return;
+    
+    // Substitui a árvore de navegação para que o usuário não consiga voltar para esta tela
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 
   @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.darkGray,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            children: [
-              const SizedBox(height: 32),
-              const Text(
-                'AVISO DE PRIVACIDADE',
+      backgroundColor: AppColors.background,
+      // Se for modo de consulta, exibe uma barra de voltar elegante no topo
+      appBar: !widget.isGateMode
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: AppColors.white),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              title: const Text(
+                'POLÍTICA DE PRIVACIDADE',
                 style: TextStyle(
                   color: AppColors.white,
-                  fontSize: 20,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
+                  letterSpacing: 1.5,
                 ),
               ),
-              const SizedBox(height: 8),
-              Container(
-                height: 2,
-                color: AppColors.accent,
-                margin: const EdgeInsets.symmetric(horizontal: 40),
-              ),
-              const SizedBox(height: 32),
+              centerTitle: true,
+            )
+          : null,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            children: [
+              if (widget.isGateMode) ...[
+                const SizedBox(height: 20),
+                const Icon(
+                  Icons.shield_outlined,
+                  size: 64,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'AVISO DE PRIVACIDADE',
+                  style: TextStyle(
+                    color: AppColors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  height: 2,
+                  width: 80,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(height: 24),
+              ],
+              
+              // Container com os Termos de Uso e Rolagem
               Expanded(
-                child: SingleChildScrollView(
-                  child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: AppColors.background,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.mediumGray,
-                        width: 1,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.darkGray,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.mediumGray.withValues(alpha: 0.5),
+                      width: 1,
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Scrollbar(
+                      controller: _scrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildSection(
+                              icon: Icons.lock_outline,
+                              title: 'Tratamento de Dados',
+                              text: 'O AngoMovie IPTV não recolhe, armazena, monitoriza ou partilha quaisquer dados pessoais dos utilizadores. Todas as configurações e listas de canais são guardadas única e exclusivamente de forma local no seu próprio dispositivo.',
+                            ),
+                            _buildSection(
+                              icon: Icons.wifi_lock,
+                              title: 'Segurança nas Conexões de Rede',
+                              text: 'Alguns fluxos de transmissão utilizam o protocolo HTTP simples. Recomendamos o uso de conexões seguras privadas (como Wi-Fi doméstico protegido ou planos de dados de operadoras confiáveis) para prevenir interceptações de tráfego de rede por terceiros.',
+                            ),
+                            _buildSection(
+                              icon: Icons.sd_storage_outlined,
+                              title: 'Armazenamento no Dispositivo',
+                              text: 'Para otimizar o tempo de resposta e garantir uma reprodução fluida, o aplicativo armazena temporariamente metadados de streaming no armazenamento físico local. Nenhuma destas informações é transmitida para servidores externos do app.',
+                            ),
+                            _buildSection(
+                              icon: Icons.gavel_outlined,
+                              title: 'Exclusão de Responsabilidade',
+                              text: 'O AngoMovie IPTV atua puramente como um reprodutor multimédia (player). Não hospedamos, distribuímos, vendemos ou controlamos as listas de canais. A legalidade e direitos de transmissão dos conteúdos reproduzidos são da total responsabilidade do fornecedor do serviço IPTV contratado por si.',
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Política de Privacidade',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 16),
-                        Text(
-                          'AngoMovie IPTV não coleta, armazena ou compartilha dados pessoais. Todos os dados de canais são salvos apenas no seu dispositivo. O app acessa servidores de terceiros para reprodução de streams – responsabilidade pelo conteúdo é do provedor do serviço.',
-                          style: TextStyle(
-                            color: AppColors.lightGray,
-                            fontSize: 14,
-                            height: 1.6,
-                          ),
-                        ),
-                        SizedBox(height: 20),
-                        Text(
-                          'Conexões de Rede',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Alguns servidores de streams utilizam protocolo HTTP (não seguro), o que pode permitir que terceiros visualizem dados da conexão. O app limita o acesso apenas a servidores autorizados, mas recomendamos usar conexões de rede segura (Wi-Fi privada ou dados móveis) ao utilizar o app.',
-                          style: TextStyle(
-                            color: AppColors.lightGray,
-                            fontSize: 14,
-                            height: 1.6,
-                          ),
-                        ),
-                        SizedBox(height: 20),
-                        Text(
-                          'Armazenamento Local',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Os dados dos canais são armazenados localmente no dispositivo para melhorar a performance. Nenhuma informação é enviada para servidores externos além da lista de canais.',
-                          style: TextStyle(
-                            color: AppColors.lightGray,
-                            fontSize: 14,
-                            height: 1.6,
-                          ),
-                        ),
-                        SizedBox(height: 20),
-                        Text(
-                          'Responsabilidade pelo Conteúdo',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'O AngoMovie IPTV é um reprodutor de conteúdo. A responsabilidade pelo conteúdo exibido é inteiramente do provedor do serviço IPTV. O app não hospeda nem distribui conteúdo.',
-                          style: TextStyle(
-                            color: AppColors.lightGray,
-                            fontSize: 14,
-                            height: 1.6,
-                          ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: () => _accept(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: const Text(
-                    'ENTENDI',
-                    style: TextStyle(
-                      color: AppColors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
+              
+              // Exibe o botão de confirmação apenas se estiver no modo de Bloqueio Inicial
+              if (widget.isGateMode) ...[
+                const SizedBox(height: 20),
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 300),
+                  opacity: _hasScrolledToBottom ? 1.0 : 0.5,
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      // Força o usuário a rolar os termos até o fim antes de liberar o botão (Garante segurança jurídica)
+                      onPressed: _hasScrolledToBottom ? () => _accept(context) : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        disabledBackgroundColor: AppColors.mediumGray,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        _hasScrolledToBottom ? 'ACEITAR E CONTINUAR' : 'ROLE ATÉ O FIM PARA ACEITAR',
+                        style: TextStyle(
+                          color: _hasScrolledToBottom ? AppColors.white : AppColors.textMuted,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSection({
+    required IconData icon,
+    required String title,
+    required String text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.bottom(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: AppColors.accent, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppColors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            text,
+            style: const TextStyle(
+              color: AppColors.lightGray,
+              fontSize: 13,
+              height: 1.6,
+            ),
+            textAlign: TextAlign.justify,
+          ),
+        ],
       ),
     );
   }
