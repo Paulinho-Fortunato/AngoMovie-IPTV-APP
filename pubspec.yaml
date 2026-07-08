@@ -10,34 +10,35 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Video Player
-  video_player: ^2.9.3
-  chewie: ^1.8.5
+  # Universal Video Player Engine (Decodifica áudio Dolby AC-3, E-AC-3, DTS e vídeos .ts)
+  flutter_vlc_player: ^7.4.1
 
   # HTTP & Networking
-  http: 1.5.0
-  dio: ^5.7.0
+  http: ^1.2.0
 
-  # Local Storage
-  hive: 2.2.3
-  hive_flutter: 1.1.0
+  # Local Storage (Rápido e Cacheado)
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
 
-  # State Management
-  provider: 6.1.5+1
+  # State Management (Reatividade na UI)
+  provider: ^6.1.2
 
-  # Image Loading
+  # Image Loading (Cache inteligente de logotipos em RAM/Disco)
   cached_network_image: ^3.4.1
 
-  # Shared Preferences
-  shared_preferences: 2.5.3
+  # Shared Preferences (Definições de Usuário e Segurança)
+  shared_preferences: ^2.3.2
 
-  # Connectivity
+  # Android Intents (Para abrir canais no VLC ou MX Player externo)
+  android_intent_plus: ^5.0.2
+
+  # Connectivity (Monitoramento de estado da rede)
   connectivity_plus: ^6.1.4
 
-  # Wakelock
-  wakelock_plus: ^1.3.1
+  # Wakelock (Impede que a TV ou Telemóvel desligue o ecrã durante a reprodução)
+  wakelock_plus: ^1.2.8
 
-  # Path Provider (for crash logs)
+  # Path Provider (Para logs físicos de depuração e caminhos de arquivo)
   path_provider: ^2.1.1
 
   # Icons
