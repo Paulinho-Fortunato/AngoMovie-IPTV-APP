@@ -1,32 +1,26 @@
+// lib/services/m3u_parser.dart
 import 'dart:convert';
 import '../models/channel.dart';
 
 class M3uParser {
-  // Regex compilada uma única vez para mapear os atributos (tvg-id, group-title, etc.)
   static final RegExp _attrRegex = RegExp(r'(\S+)\s*=\s*"([^"]*)"');
 
-  // Regex inteligente com "word boundary" (\b) para filtrar VOD/Filmes sob demanda 
-  // sem excluir canais de TV ao vivo como "HBO Filmes" ou "Telecine Filmes"
+  // Filtro de VOD aperfeiçoado para remover apenas quando solicitado
   static final RegExp _vodFilterRegex = RegExp(
-    r'\b(VOD|MOVIE|EPISODIO|TEMPORADA|ANIME|EPISODIOS|VODS|MOVIES)\b',
+    r'\b(VOD|MOVIE|EPISODIO|TEMPORADA|ANIME|EPISODIOS|VODS|MOVIES|S01|S02|S03|S04|S05|NOVELA)\b',
     caseSensitive: false,
   );
 
-  /// Converte o conteúdo do M3U em uma lista de objetos Channel de forma síncrona
-  static List<Channel> parse(String content) {
-    final maps = parseToMap(content);
+  static List<Channel> parse(String content, {bool ignoreVod = false}) {
+    final maps = parseToMap(content, ignoreVod: ignoreVod);
     return maps.map((m) => Channel.fromM3uEntry(m)).toList();
   }
 
-  /// Converte o arquivo M3U em um mapa de alta performance
-  static List<Map<String, String>> parseToMap(String content) {
+  static List<Map<String, String>> parseToMap(String content, {bool ignoreVod = false}) {
     final List<Map<String, String>> channels = [];
-
     if (content.trim().isEmpty) return channels;
 
-    // PERFORMANCE: LineSplitter nativo do Dart evita duplicação de strings na memória RAM
     final lines = const LineSplitter().convert(content);
-
     String? currentExtInf;
     final Map<String, String> currentVlcOpts = {};
 
@@ -38,7 +32,6 @@ class M3uParser {
         currentExtInf = line;
         currentVlcOpts.clear();
       } else if (line.startsWith('#EXTVLCOPT:')) {
-        // Captura opções personalizadas do VLC (Headers, User-Agent, etc.)
         final opt = line.substring('#EXTVLCOPT:'.length);
         final eq = opt.indexOf('=');
         if (eq != -1) {
@@ -49,27 +42,22 @@ class M3uParser {
           currentVlcOpts['vlc-${opt.trim()}'] = '';
         }
       } else if (line.startsWith('#')) {
-        // Ignora outros comentários do arquivo
         continue;
       } else {
-        // Linha sem comentário -> Assume-se que seja a URL do fluxo de vídeo
         final url = line;
+        Map<String, String> entry = currentExtInf != null 
+            ? _parseExtInf(currentExtInf, url) 
+            : _parseUrlOnly(url);
 
-        Map<String, String> entry;
-        if (currentExtInf != null) {
-          entry = _parseExtInf(currentExtInf, url);
-        } else {
-          entry = _parseUrlOnly(url);
-        }
-
-        // Mescla as opções de VLC associadas ao canal
         if (currentVlcOpts.isNotEmpty) {
           entry.addAll(currentVlcOpts);
         }
 
-        // Filtro de canais ao vivo (Exclui VODs puros mas preserva canais de TV de Filmes)
         final group = entry['group-title'] ?? 'Geral';
-        if (_isLiveTv(group)) {
+        
+        // DECISÃO DINÂMICA: Se "ignoreVod" for falso, adiciona tudo. 
+        // Se for verdadeiro, aplica o filtro de TV ao vivo.
+        if (!ignoreVod || _isLiveTv(group)) {
           channels.add(entry);
         }
 
@@ -77,22 +65,15 @@ class M3uParser {
         currentVlcOpts.clear();
       }
     }
-
     return channels;
   }
 
-  /// Verifica se a categoria do canal corresponde a TV Ao Vivo ou VOD puro
   static bool _isLiveTv(String groupTitle) {
-    // Se a categoria contiver a palavra exata "VOD", "MOVIE", "TEMPORADA", etc., é excluída.
-    // Categorias como "Canais de Filmes" ou "Telecine Filmes" passam sem problemas.
     return !_vodFilterRegex.hasMatch(groupTitle);
   }
 
-  /// Efetua o mapeamento das propriedades usando a Regex pré-compilada
   static Map<String, String> _parseExtInf(String extInf, String url) {
     final Map<String, String> result = {'url': url};
-
-    // PERFORMANCE: Uso da Regex estática pré-compilada (Até 90% mais rápido)
     final matches = _attrRegex.allMatches(extInf);
     for (final match in matches) {
       final key = match.group(1);
@@ -102,7 +83,6 @@ class M3uParser {
       }
     }
 
-    // Extrai o nome amigável do canal após a última vírgula
     final commaIndex = extInf.lastIndexOf(',');
     if (commaIndex != -1) {
       final name = extInf.substring(commaIndex + 1).trim();
@@ -112,26 +92,19 @@ class M3uParser {
       }
     }
 
-    // Normalização rápida de chaves
     result['group-title'] = result['group-title'] ?? result['group_title'] ?? 'Geral';
     result['tvg-logo'] = result['tvg-logo'] ?? result['tvg_logo'] ?? '';
     result['tvg-id'] = result['tvg-id'] ?? result['tvg_id'] ?? '';
-
     return result;
   }
 
-  /// Gera metadados temporários caso o canal venha apenas com a URL no arquivo
   static Map<String, String> _parseUrlOnly(String url) {
     final Map<String, String> result = {'url': url};
-
     try {
       final uri = Uri.parse(url);
       String name = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : uri.host;
-      
-      // Remove extensões de arquivo comuns
       name = name.replaceAll(RegExp(r'\.(m3u8?|mp4|ts)$', caseSensitive: false), '');
       if (name.isEmpty) name = uri.host;
-      
       result['name'] = name;
       result['tvg-name'] = name;
       result['group-title'] = 'Geral';
@@ -144,7 +117,6 @@ class M3uParser {
       result['tvg-logo'] = '';
       result['tvg-id'] = '';
     }
-
     return result;
   }
 }
