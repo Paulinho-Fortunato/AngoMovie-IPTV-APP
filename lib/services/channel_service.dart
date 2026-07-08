@@ -5,15 +5,14 @@ import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
-import 'm3u_parser_worker.dart'; // Importação do Isolate Worker
+import 'm3u_parser_worker.dart';
 
 class ChannelService {
+  // Lista M3U principal do utilizador
   static const String _defaultM3uUrl =
       'https://raw.githubusercontent.com/Paulinho-Fortunato/Segundalista/refs/heads/main/z.m3u';
   static const String _m3uPrefKey = 'm3u_url';
   static const String _lastFetchKey = 'last_fetch_time';
-  
-  // Chave de Preferência para ocultar ou exibir Filmes/Séries
   static const String _hideVodPrefKey = 'hide_vod_streams';
 
   static Box<Channel>? _channelBox;
@@ -28,7 +27,7 @@ class ChannelService {
     _metaBox = await Hive.openBox('channel_meta');
   }
 
-  /// Retorna se o utilizador deseja ocultar filmes e séries (Default: false = MOSTRAR TUDO)
+  /// Retorna se o utilizador deseja ocultar filmes e séries (Default: false)
   static Future<bool> getHideVod() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_hideVodPrefKey) ?? false;
@@ -46,6 +45,21 @@ class ChannelService {
     return prefs.getString(_m3uPrefKey) ?? _defaultM3uUrl;
   }
 
+  /// Inteligência de Rede: Corrige erros de digitação comuns de protocolos/portas de IPTV
+  static String _normalizeUrl(String url) {
+    var cleanedUrl = url.trim();
+    
+    // CORREÇÃO CRÍTICA: Se a URL contiver ":80" e começar com "https://", 
+    // força a alteração para "http://" para evitar falhas de handshake SSL/TLS
+    if (cleanedUrl.toLowerCase().startsWith('https://') && cleanedUrl.contains(':80/')) {
+      cleanedUrl = cleanedUrl.replaceFirst(RegExp(r'https://', caseSensitive: false), 'http://');
+      if (kDebugMode) {
+        debugPrint('🔧 URL normalizada de HTTPS para HTTP para compatibilidade com a porta 80.');
+      }
+    }
+    return cleanedUrl;
+  }
+
   /// Salva um link M3U customizado
   static Future<void> setM3uUrl(String? url) async {
     final prefs = await SharedPreferences.getInstance();
@@ -53,8 +67,9 @@ class ChannelService {
       await prefs.remove(_m3uPrefKey);
       if (kDebugMode) debugPrint('🔧 Link M3U restaurado para o padrão.');
     } else {
-      await prefs.setString(_m3uPrefKey, url.trim());
-      if (kDebugMode) debugPrint('🔧 Link M3U atualizado para: $url');
+      final normalized = _normalizeUrl(url);
+      await prefs.setString(_m3uPrefKey, normalized);
+      if (kDebugMode) debugPrint('🔧 Link M3U configurado para: $normalized');
     }
   }
 
@@ -87,13 +102,15 @@ class ChannelService {
   /// Efetua o download e parseamento ultra-veloz da lista remota em Isolate
   static Future<List<Channel>> _fetchFromRemote() async {
     try {
-      final m3uUrl = await getM3uUrl();
-      final hideVod = await getHideVod(); // Lê a preferência do utilizador
+      final rawM3uUrl = await getM3uUrl();
+      final m3uUrl = _normalizeUrl(rawM3uUrl); // Aplica a normalização inteligente
+      final hideVod = await getHideVod();
 
       if (kDebugMode) {
-        debugPrint('📡 Conectando ao servidor. Filtro de VOD Ativado: $hideVod');
+        debugPrint('📡 Conectando ao servidor: $m3uUrl | Filtro de VOD: $hideVod');
       }
 
+      // Aumentado o Timeout para 60 segundos para suportar listas Xtream gigantes (20MB+)
       final response = await http.get(
         Uri.parse(m3uUrl),
         headers: {
@@ -101,7 +118,7 @@ class ChannelService {
           'Accept-Encoding': 'gzip, deflate',
           'Accept': '*/*',
         },
-      ).timeout(const Duration(seconds: 25));
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
         final m3uContent = response.body;
@@ -110,10 +127,9 @@ class ChannelService {
           throw Exception('O arquivo M3U obtido está vazio.');
         }
 
-        // INTEGRADO: Chama o Isolate Worker em segundo plano enviando a preferência
+        // Envia para o Isolate Worker em segundo plano
         final entries = await parseM3uInIsolate(m3uContent, ignoreVod: hideVod);
         
-        // UX PRESERVADA: Resgata canais que já estavam favoritados
         final currentBox = _channelBox ?? await Hive.openBox<Channel>('channels');
         final Set<String> favoriteIds = currentBox.values
             .where((c) => c.isFavorite)
@@ -145,14 +161,13 @@ class ChannelService {
           throw Exception('Nenhum canal compatível encontrado na sua lista.');
         }
 
-        // Escrita ultra veloz em lote de metadados
         if (batchMeta.isNotEmpty) {
           final metaBox = _metaBox ?? await Hive.openBox('channel_meta');
           await metaBox.putAll(batchMeta);
         }
 
         if (kDebugMode) {
-          debugPrint('📊 Parseamento finalizado. ${channels.length} conteúdos estruturados.');
+          debugPrint('📊 Sincronização finalizada. ${channels.length} conteúdos carregados.');
         }
 
         await _saveToCache(channels);
@@ -163,7 +178,6 @@ class ChannelService {
     } catch (e) {
       debugPrint('❌ Erro no sincronismo de rede: $e');
 
-      // Fallback seguro em caso de falha de conexão
       final box = _channelBox ?? await Hive.openBox<Channel>('channels');
       if (box.isNotEmpty) {
         return box.values.toList();
