@@ -8,6 +8,13 @@ import '../models/channel.dart';
 import '../utils/app_colors.dart';
 import '../services/channel_service.dart';
 
+// Modos de enquadramento de vídeo suportados
+enum AspectRatioMode {
+  fit,    // Mantém a proporção original (com barras pretas se necessário)
+  stretch, // Estica o vídeo para preencher todo o ecrã
+  zoom,   // Corta as bordas para preencher o ecrã sem distorcer
+}
+
 class PlayerScreen extends StatefulWidget {
   final Channel channel;
 
@@ -20,18 +27,29 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen>
     with TickerProviderStateMixin {
   VideoPlayerController? _controller;
+  
   bool _isControlsVisible = true;
-
   bool _hasError = false;
+  bool _isBuffering = false; // Estado de Buffering em tempo real
   String _errorMessage = '';
+  
   Timer? _hideControlsTimer;
   late AnimationController _controlsAnimController;
   late Animation<double> _controlsAnimation;
+
+  // Recursos Premium para Gestão de Ecrã
+  AspectRatioMode _aspectRatioMode = AspectRatioMode.fit;
+  double _volumeValue = 0.5;      // Controlado por gesto do lado direito
+  double _brightnessValue = 0.5;  // Controlado por gesto do lado esquerdo
+  bool _showVolumeIndicator = false;
+  bool _showBrightnessIndicator = false;
+  Timer? _indicatorTimer;
 
   @override
   void initState() {
     super.initState();
     WakelockPlus.enable();
+    
     _controlsAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -39,11 +57,26 @@ class _PlayerScreenState extends State<PlayerScreen>
     _controlsAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(parent: _controlsAnimController, curve: Curves.easeInOut),
     );
+    
     _initPlayer();
     _scheduleHideControls();
   }
 
+  // Descarte seguro de processos para evitar Vazamento de Memória
+  Future<void> _disposeController() async {
+    if (_controller != null) {
+      _controller!.removeListener(_onPlayerStateChanged);
+      try {
+        await _controller!.pause();
+      } catch (_) {}
+      await _controller!.dispose();
+      _controller = null;
+    }
+  }
+
   Future<void> _initPlayer() async {
+    await _disposeController(); // Garante o encerramento de conexões órfãs
+
     // Forçar modo paisagem e imersivo ao entrar no player
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -54,14 +87,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     try {
       final uri = Uri.parse(widget.channel.streamUrl);
 
-      // --- LEITURA DE METADADOS (vlc-http-user-agent, etc.)
+      // Leitura dos Metadados (VLC/Headers customizados)
       final meta = await ChannelService.getChannelMeta(widget.channel.id);
       final headers = <String, String>{};
 
-      // User-Agent Padrão do app
       headers['User-Agent'] = 'AngoMovie/1.2.0 Android';
 
-      // Aplicar opções personalizadas do VLC se estiverem presentes
       if (meta.containsKey('vlc-http-user-agent')) {
         headers['User-Agent'] = meta['vlc-http-user-agent']!;
       }
@@ -73,10 +104,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       }
 
       if (kDebugMode) {
-        debugPrint('🎯 Player headers for ${widget.channel.name}: $headers');
+        debugPrint('🎯 Player headers para ${widget.channel.name}: $headers');
       }
 
-      // Se o usuário saiu da tela enquanto os metadados eram carregados da API
       if (!mounted) return;
 
       final controller = VideoPlayerController.networkUrl(
@@ -91,10 +121,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       _controller = controller;
       await controller.initialize();
 
-      // PROTEÇÃO: Se o usuário saiu da tela durante a inicialização demorada da rede
       if (!mounted) {
         await controller.dispose();
-        if (_controller == controller) _controller = null;
         return;
       }
 
@@ -103,30 +131,42 @@ class _PlayerScreenState extends State<PlayerScreen>
       controller.addListener(_onPlayerStateChanged);
       
     } catch (e, st) {
-      if (kDebugMode) debugPrint('❌ Player init error: $e\n$st');
+      if (kDebugMode) debugPrint('❌ Falha na inicialização do player: $e\n$st');
       if (mounted) {
         setState(() {
           _hasError = true;
-          _errorMessage = 'Erro ao carregar stream. Verifique sua conexão.';
+          _errorMessage = 'Erro ao carregar stream. Verifique a sua conexão de rede.';
         });
       }
     }
   }
 
   void _onPlayerStateChanged() {
-    if (_controller?.value.hasError == true && mounted) {
+    if (_controller == null || !mounted) return;
+
+    // Detectar erro crítico no reprodutor de vídeo
+    if (_controller!.value.hasError) {
       setState(() {
         _hasError = true;
-        _errorMessage = 'Stream indisponível no momento.';
+        _errorMessage = 'O stream de vídeo parou ou ficou indisponível.';
+      });
+      return;
+    }
+
+    // Monitoramento do Buffering em Tempo Real
+    final isBuffering = _controller!.value.isBuffering;
+    if (isBuffering != _isBuffering) {
+      setState(() {
+        _isBuffering = isBuffering;
       });
     }
   }
 
   void _scheduleHideControls() {
     _hideControlsTimer?.cancel();
-    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+    _hideControlsTimer = Timer(const Duration(seconds: 4), () {
       if (mounted && _isControlsVisible) {
-        _controlsAnimController.forward(); // Faz o efeito fade-out rodar
+        _controlsAnimController.forward();
         setState(() => _isControlsVisible = false);
       }
     });
@@ -138,10 +178,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       _isControlsVisible = !_isControlsVisible;
     });
     if (_isControlsVisible) {
-      _controlsAnimController.reverse(); // Mostra os controles
-      _scheduleHideControls(); // Inicia contagem para sumir de novo
+      _controlsAnimController.reverse();
+      _scheduleHideControls();
     } else {
-      _controlsAnimController.forward(); // Esconde os controles
+      _controlsAnimController.forward();
     }
   }
 
@@ -154,7 +194,45 @@ class _PlayerScreenState extends State<PlayerScreen>
         _controller!.play();
       }
     });
-    _scheduleHideControls(); // Reinicia o timer ao clicar para não sumir na hora
+    _scheduleHideControls();
+  }
+
+  void _cycleAspectRatio() {
+    setState(() {
+      _aspectRatioMode = AspectRatioMode.values[
+          (_aspectRatioMode.index + 1) % AspectRatioMode.values.length];
+    });
+    _scheduleHideControls();
+  }
+
+  // Manipuladores de Gestos para Volume e Brilho do Ecrã
+  void _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) {
+    _scheduleHideControls();
+    final isLeftSide = details.globalPosition.dx < (screenWidth / 2);
+    final dragDelta = -details.primaryDelta! / 150.0; // Sensibilidade de arraste
+
+    setState(() {
+      if (isLeftSide) {
+        // Controle de Brilho
+        _brightnessValue = (_brightnessValue + dragDelta).clamp(0.0, 1.0);
+        _showBrightnessIndicator = true;
+        _showVolumeIndicator = false;
+      } else {
+        // Controle de Volume
+        _volumeValue = (_volumeValue + dragDelta).clamp(0.0, 1.0);
+        _controller?.setVolume(_volumeValue);
+        _showVolumeIndicator = true;
+        _showBrightnessIndicator = false;
+      }
+    });
+
+    _indicatorTimer?.cancel();
+    _indicatorTimer = Timer(const Duration(milliseconds: 1200), () {
+      setState(() {
+        _showBrightnessIndicator = false;
+        _showVolumeIndicator = false;
+      });
+    });
   }
 
   Future<void> _exitPlayer() async {
@@ -170,8 +248,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
-    _controller?.removeListener(_onPlayerStateChanged);
-    _controller?.dispose();
+    _indicatorTimer?.cancel();
+    _disposeController();
     _controlsAnimController.dispose();
     WakelockPlus.disable();
     SystemChrome.setPreferredOrientations([
@@ -184,22 +262,23 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _toggleControls, // Toque no fundo alterna a visibilidade de TUDO
+        onTap: _toggleControls,
+        onDoubleTap: _togglePlayPause, // Toque duplo pausa ou dá play instantâneo
+        onVerticalDragUpdate: (details) => _handleVerticalDragUpdate(details, size.width),
         child: Stack(
           children: [
-            // Camada 1: O Vídeo Player
+            // CAMADA 1: O Renderizador do Vídeo com Aspect Ratio Dinâmico
             Center(
               child: _hasError
                   ? _buildErrorScreen()
                   : _controller?.value.isInitialized == true
-                      ? AspectRatio(
-                          aspectRatio: _controller!.value.aspectRatio,
-                          child: VideoPlayer(_controller!),
-                        )
+                      ? _buildVideoPlayerWrapper()
                       : const Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -207,7 +286,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               CircularProgressIndicator(color: AppColors.accent),
                               SizedBox(height: 16),
                               Text(
-                                'Conectando ao stream...',
+                                'Conectando ao stream de TV...',
                                 style: TextStyle(color: AppColors.lightGray),
                               ),
                             ],
@@ -215,10 +294,27 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
             ),
 
-            // Camada 2: Toda a interface de controle (Envolvida na animação)
+            // CAMADA 2: Indicador Visual de Buffering (No meio do filme/canal)
+            if (_isBuffering && !_hasError && _controller?.value.isInitialized == true)
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const CircularProgressIndicator(color: AppColors.accent),
+                ),
+              ),
+
+            // CAMADA 3: HUD Indicador de Gestos Deslizantes (Brilho / Volume)
+            if (_showVolumeIndicator) _buildGestureHUD(Icons.volume_up, _volumeValue, 'Volume'),
+            if (_showBrightnessIndicator) _buildGestureHUD(Icons.brightness_5, _brightnessValue, 'Brilho'),
+
+            // CAMADA 4: Controles de Reprodução Interativos
             if (!_hasError)
               IgnorePointer(
-                ignoring: !_isControlsVisible, // Bloqueia toques fantasmas quando invisível
+                ignoring: !_isControlsVisible,
                 child: AnimatedBuilder(
                   animation: _controlsAnimation,
                   builder: (context, child) {
@@ -236,6 +332,67 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
+  // Construtor Inteligente de Enquadramento de Imagem (Formato)
+  Widget _buildVideoPlayerWrapper() {
+    final videoValue = _controller!.value;
+
+    switch (_aspectRatioMode) {
+      case AspectRatioMode.stretch:
+        // Estica a imagem para preencher toda a tela artificialmente
+        return SizedBox.expand(
+          child: VideoPlayer(_controller!),
+        );
+      case AspectRatioMode.zoom:
+        // Dá crop (corte) inteligente na imagem mantendo o foco sem distorcer o elemento
+        return SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: videoValue.size.width,
+              height: videoValue.size.height,
+              child: VideoPlayer(_controller!),
+            ),
+          ),
+        );
+      case AspectRatioMode.fit:
+      default:
+        // Padrão original da emissora/transmissora
+        return AspectRatio(
+          aspectRatio: videoValue.aspectRatio,
+          child: VideoPlayer(_controller!),
+        );
+    }
+  }
+
+  // Indicador Visual Estilizado dos Gestos no Ecrã (Brilho / Volume)
+  Widget _buildGestureHUD(IconData icon, double value, String label) {
+    return Positioned(
+      top: 40,
+      left: label == 'Brilho' ? 40 : null,
+      right: label == 'Volume' ? 40 : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.white.withValues(alpha: 0.1), width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: AppColors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              '${(value * 100).toInt()}%',
+              style: const TextStyle(color: AppColors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Barra de Comandos e Controles da Tela
   Widget _buildControls() {
     final isPlaying = _controller?.value.isPlaying ?? false;
 
@@ -245,136 +402,141 @@ class _PlayerScreenState extends State<PlayerScreen>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color(0xCC000000), // Sombra superior
+            Color(0xCC000000), // Gradiente superior
             Colors.transparent,
             Colors.transparent,
-            Color(0xCC000000), // Sombra inferior
+            Color(0xCC000000), // Gradiente inferior
           ],
           stops: [0.0, 0.25, 0.75, 1.0],
         ),
       ),
-      child: Column(
-        children: [
-          // 1. BARRA SUPERIOR
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: AppColors.white, size: 28),
-                  onPressed: _exitPlayer,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.channel.name,
-                        style: const TextStyle(
-                          color: AppColors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        widget.channel.groupTitle,
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (widget.channel.isHttpStream) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(153),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'HTTP',
-                      style: TextStyle(color: AppColors.warning, fontSize: 11),
-                    ),
+      child: SafeArea(
+        // O SafeArea dentro do Container previne que furos na tela/notches cubram os botões
+        child: Column(
+          children: [
+            // 1. BARRA SUPERIOR
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: AppColors.white, size: 28),
+                    onPressed: _exitPlayer,
                   ),
                   const SizedBox(width: 8),
-                ],
-                IconButton(
-                  icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
-                  onPressed: () {
-                    _scheduleHideControls(); // Adia o sumiço automático
-                    // TODO: Menu de definições
-                  },
-                ),
-              ],
-            ),
-          ),
-
-          // 2. BOTÃO CENTRAL (PLAY/PAUSE)
-          Expanded(
-            child: Center(
-              child: IconButton(
-                iconSize: 70,
-                onPressed: _togglePlayPause,
-                icon: Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.accent.withAlpha(216),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.channel.name,
+                          style: const TextStyle(
+                            color: AppColors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          widget.channel.groupTitle,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Icon(
-                    isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: AppColors.white,
-                    size: 40,
+                  if (widget.channel.isHttpStream) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'HTTP',
+                        style: TextStyle(color: AppColors.warning, fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  IconButton(
+                    icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
+                    onPressed: () {
+                      _scheduleHideControls();
+                      // TODO: Menu de configurações avançadas (Legenda/Aúdio se houver)
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. BOTÃO CENTRAL DE REPRODUÇÃO
+            Expanded(
+              child: Center(
+                child: IconButton(
+                  iconSize: 70,
+                  onPressed: _togglePlayPause,
+                  icon: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppColors.accent.withValues(alpha: 0.85),
+                    ),
+                    child: Icon(
+                      isPlaying ? Icons.pause : Icons.play_arrow,
+                      color: AppColors.white,
+                      size: 40,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
 
-          // 3. BARRA INFERIOR (Barra vermelha removida com sucesso)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    'AO VIVO',
-                    style: TextStyle(
-                      color: AppColors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+            // 3. BARRA INFERIOR (Controles Rápidos de Proporção e Status)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'AO VIVO',
+                      style: TextStyle(
+                        color: AppColors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.volume_up, color: AppColors.white, size: 22),
-                  onPressed: () {
-                    _scheduleHideControls(); // Adia o sumiço automático
-                    // TODO: Controle de volume
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.fullscreen, color: AppColors.white, size: 22),
-                  onPressed: () {
-                    _scheduleHideControls(); // Adia o sumiço automático
-                  },
-                ),
-              ],
+                  const Spacer(),
+                  
+                  // Botão de Modificar Aspect Ratio de Vídeo (Esticar / Ajustar / Zoom)
+                  IconButton(
+                    icon: Icon(
+                      _aspectRatioMode == AspectRatioMode.fit
+                          ? Icons.fit_screen
+                          : _aspectRatioMode == AspectRatioMode.stretch
+                              ? Icons.fullscreen_exit
+                              : Icons.aspect_ratio,
+                      color: AppColors.white,
+                      size: 24,
+                    ),
+                    onPressed: _cycleAspectRatio,
+                    tooltip: 'Proporção do Ecrã',
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
