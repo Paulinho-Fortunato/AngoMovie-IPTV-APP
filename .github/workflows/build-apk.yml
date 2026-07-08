@@ -12,29 +12,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Baixa o código do repositório para a máquina virtual do GitHub
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Configura a JDK do Java (Zulu 17 é excelente para compilação Android)
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
+      # 3. Configura o Flutter estável na nuvem
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.35.4'
-          channel: 'stable'
+          channel: 'stable' # Usa sempre a versão estável mais atualizada para evitar bugs de pacotes
 
+      # 4. Baixa todas as novas dependências (VLC Player, Intent Plus, etc.)
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      # 5. PASSO CRÍTICO: Reconstrói o "channel.g.dart" na nuvem com o novo campo de Favoritos
+      # Como você edita diretamente no GitHub, este passo garante que o build não falhe
+      - name: Generate Hive Adapters
+        run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Upload APK
+      # 6. Compila o APK de Produção (Ofuscado contra piratas e dividido para TV/Telemóvel)
+      - name: Build APK
+        run: |
+          flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols --split-per-abi
+
+      # 7. Faz o upload dos APKs otimizados para você baixar na aba "Actions"
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: AngoMovie-IPTV-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: AngoMovie-IPTV
+          # Coleta os 3 APKs divididos e otimizados gerados pelo "split-per-abi"
+          path: build/app/outputs/flutter-apk/*.apk
