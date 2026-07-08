@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/channel_provider.dart';
 import '../utils/app_colors.dart';
 import '../services/channel_service.dart';
 import 'privacy_screen.dart';
@@ -14,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _blockHttpStreams = false;
   String _m3uUrl = '';
+  bool _isClearing = false;
 
   @override
   void initState() {
@@ -37,14 +40,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _clearCache() async {
-    await ChannelService.clearCache();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cache limpo com sucesso!'),
-          backgroundColor: AppColors.darkGray,
-        ),
-      );
+    if (_isClearing) return;
+    setState(() => _isClearing = true);
+
+    try {
+      await ChannelService.clearCache();
+      
+      // REATIVIDADE: Limpa o estado global de canais no Provider
+      if (mounted) {
+        context.read<ChannelProvider>().clearSearch();
+        await context.read<ChannelProvider>().refreshChannels();
+      }
+
+      if (mounted) {
+        _showSuccessSnackBar('Cache e canais redefinidos com sucesso!');
+      }
+    } catch (e) {
+      if (mounted) _showErrorSnackBar('Erro ao limpar cache.');
+    } finally {
+      if (mounted) setState(() => _isClearing = false);
     }
   }
 
@@ -53,91 +67,134 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('block_http_streams', value);
     if (mounted) {
       setState(() => _blockHttpStreams = value);
+      // REATIVIDADE: Recarrega os canais respeitando o novo filtro de segurança
+      context.read<ChannelProvider>().refreshChannels();
     }
   }
 
   Future<void> _editM3uUrl() async {
     final controller = TextEditingController(text: _m3uUrl);
+    final formKey = GlobalKey<FormState>();
     
     final result = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.background,
-        title: const Text('URL M3U personalizada', style: TextStyle(color: AppColors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Insira uma URL M3U para testes. Deixe em branco para usar a URL padrão.',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(color: AppColors.white),
-              decoration: InputDecoration(
-                hintText: 'http://exemplo.com/lista.m3u',
-                hintStyle: TextStyle(color: AppColors.textMuted.withAlpha(153)),
-                filled: true,
-                fillColor: AppColors.mediumGray.withAlpha(15),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Lista M3U Personalizada', 
+          style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold)
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Insira um link M3U válido para carregar a sua lista de reprodução personalizada.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13, height: 1.4),
               ),
-              maxLines: 1,
-            ),
-          ],
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: controller,
+                keyboardType: TextInputType.url,
+                style: const TextStyle(color: AppColors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'https://exemplo.com/lista.m3u',
+                  hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.5)),
+                  filled: true,
+                  fillColor: AppColors.mediumGray.withValues(alpha: 0.15),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                maxLines: 1,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return null;
+                  final uri = Uri.tryParse(value.trim());
+                  if (uri == null || !uri.hasAbsolutePath) {
+                    return 'Insira um endereço URL válido.';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
+            child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
           ),
           TextButton(
             onPressed: () async {
-              // Resetar para a URL padrão
               await ChannelService.setM3uUrl(null);
               final newUrl = await ChannelService.getM3uUrl();
-              if (context.mounted) {
-                Navigator.of(context).pop(true);
-              }
-              // O setState e SnackBar rodam de forma segura fora do builder
-              _updateUrlState(newUrl, 'URL revertida para a padrão');
+              if (context.mounted) Navigator.of(context).pop(true);
+              _updateUrlState(newUrl, 'Lista revertida para o padrão de fábrica.');
             },
-            child: const Text('Resetar'),
+            child: const Text('Resetar', style: TextStyle(color: AppColors.error)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.accent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () async {
-              final text = controller.text.trim();
-              await ChannelService.setM3uUrl(text.isEmpty ? null : text);
-              final newUrl = await ChannelService.getM3uUrl();
-              if (context.mounted) {
-                Navigator.of(context).pop(true);
+              if (formKey.currentState?.validate() == true) {
+                final text = controller.text.trim();
+                await ChannelService.setM3uUrl(text.isEmpty ? null : text);
+                final newUrl = await ChannelService.getM3uUrl();
+                if (context.mounted) Navigator.of(context).pop(true);
+                _updateUrlState(newUrl, 'Nova lista de canais carregada!');
               }
-              _updateUrlState(newUrl, 'URL salva com sucesso');
             },
-            child: const Text('Salvar'),
+            child: const Text('Gravar', style: TextStyle(color: AppColors.white)),
           ),
         ],
       ),
     );
 
-    // Desaloca o controller da memória imediatamente para evitar Memory Leaks
     controller.dispose();
-
-    if (result == true) {
-      // Opcional: Adicionar lógica se necessitar atualizar componentes externos
-    }
   }
 
-  // Helper centralizado para atualizar estados de forma assíncrona e segura
   void _updateUrlState(String newUrl, String message) {
     if (!mounted) return;
     setState(() => _m3uUrl = newUrl);
+    
+    // REATIVIDADE: Notifica e recarrega os canais na Home instantaneamente
+    context.read<ChannelProvider>().refreshChannels();
+    _showSuccessSnackBar(message);
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: AppColors.white)),
+        backgroundColor: AppColors.background.withValues(alpha: 0.9),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: AppColors.darkGray,
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -145,99 +202,127 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.darkGray,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text(
           'Configurações',
-          style: TextStyle(color: AppColors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: AppColors.white, fontWeight: FontWeight.bold, fontSize: 18),
         ),
         backgroundColor: AppColors.background,
         iconTheme: const IconThemeData(color: AppColors.white),
         elevation: 0,
+        centerTitle: true,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
-          // Seção: Sobre o App
+          // SEÇÃO 1: SOBRE O APP
           _sectionTitle('Sobre o App'),
-          _infoTile('Versão', '1.2.0 (Build 3)'),
-          _infoTile('Plataforma', 'Android'),
-          _infoTile('Fonte de Dados', 'IPTV Remoto'),
-          
-          ListTile(
-            leading: const Icon(Icons.link, color: AppColors.textMuted),
-            title: const Text('URL M3U atual', style: TextStyle(color: AppColors.white, fontSize: 14)),
-            subtitle: Text(
-              _m3uUrl.isEmpty ? 'URL Padrão do Sistema' : _m3uUrl,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            trailing: const Icon(Icons.edit, color: AppColors.textMuted),
-            onTap: _editM3uUrl,
+          _buildCard(
+            children: [
+              _infoTile('Versão', '1.2.0 (Build 3)'),
+              _buildDivider(),
+              _infoTile('Plataforma', 'Android OS'),
+              _buildDivider(),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                title: const Text('Lista de Canais M3U', style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                subtitle: Text(
+                  _m3uUrl.isEmpty ? 'Usando lista interna padrão' : _m3uUrl,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.edit, color: AppColors.accent, size: 20),
+                onTap: _editM3uUrl,
+              ),
+            ],
           ),
 
           const SizedBox(height: 24),
 
-          // Seção: Cache e Dados
-          _sectionTitle('Cache e Dados'),
-          _actionTile(
-            icon: Icons.delete_sweep,
-            title: 'Limpar Cache',
-            subtitle: 'Remove canais salvos localmente',
-            onTap: _clearCache,
+          // SEÇÃO 2: CACHE E DESEMPENHO
+          _sectionTitle('Dados & Desempenho'),
+          _buildCard(
+            children: [
+              _actionTile(
+                icon: Icons.delete_sweep_outlined,
+                title: 'Limpar Cache de Streams',
+                subtitle: _isClearing ? 'A redefinir base de dados...' : 'Remove dados locais e sincroniza novamente.',
+                trailing: _isClearing 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
+                  : const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                onTap: _isClearing ? () {} : _clearCache,
+              ),
+            ],
           ),
 
           const SizedBox(height: 24),
 
-          // Seção: Segurança
-          _sectionTitle('Segurança da Conexão'),
-          _settingsTile(
-            title: 'Informação HTTP',
-            subtitle:
-                'Alguns servidores utilizam protocolo HTTP (não seguro). O app limita o acesso apenas a servidores autorizados.',
-          ),
-          SwitchListTile(
-            title: const Text(
-              'Bloquear Streams HTTP',
-              style: TextStyle(color: AppColors.white, fontSize: 14),
-            ),
-            subtitle: const Text(
-              'Apenas reproduzir streams HTTPS (pode reduzir canais disponíveis)',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-            ),
-            value: _blockHttpStreams,
-            onChanged: _toggleBlockHttp,
-            activeThumbColor: AppColors.accent,
-            inactiveThumbColor: AppColors.textMuted,
-          ),
-
-          const SizedBox(height: 24),
-
-          // Seção: Privacidade
-          _sectionTitle('Privacidade'),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip, color: AppColors.textMuted),
-            title: const Text(
-              'Ver Política de Privacidade',
-              style: TextStyle(color: AppColors.white, fontSize: 14),
-            ),
-            trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PrivacyScreen()),
-            ),
+          // SEÇÃO 3: SEGURANÇA E PROTOCOLO
+          _sectionTitle('Rede & Segurança'),
+          _buildCard(
+            children: [
+              SwitchListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                title: const Text(
+                  'Bloquear Links HTTP',
+                  style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+                subtitle: const Text(
+                  'Força ligações encriptadas (HTTPS). Melhora a privacidade, mas pode desativar alguns canais de TV mais antigos.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.4),
+                ),
+                value: _blockHttpStreams,
+                onChanged: _toggleBlockHttp,
+                activeColor: AppColors.accent,
+                activeTrackColor: AppColors.accent.withValues(alpha: 0.3),
+                inactiveThumbColor: AppColors.textMuted,
+                inactiveTrackColor: AppColors.mediumGray.withValues(alpha: 0.3),
+              ),
+            ],
           ),
 
           const SizedBox(height: 24),
 
-          // Seção: Créditos
-          _sectionTitle('Créditos'),
-          _settingsTile(
-            title: 'AngoMovie IPTV',
-            subtitle:
-                'App desenvolvido para reprodução de conteúdo IPTV. Todo o conteúdo é de responsabilidade do provedor do serviço.',
+          // SEÇÃO 4: SUPORTE E PRIVACIDADE
+          _sectionTitle('Legal & Suporte'),
+          _buildCard(
+            children: [
+              _actionTile(
+                icon: Icons.privacy_tip_outlined,
+                title: 'Política de Privacidade',
+                subtitle: 'Consulte os seus direitos e o tratamento de dados.',
+                trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    // CORREÇÃO CRÍTICA DO BUG DE LOOP DE NAVEGAÇÃO
+                    builder: (_) => const PrivacyScreen(isGateMode: false),
+                  ),
+                ),
+              ),
+              _buildDivider(),
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Aviso de Isenção',
+                      style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      'O AngoMovie IPTV é um motor de reprodução. Não alojamos nem somos responsáveis pelos streams ou conteúdos adicionados pelos utilizadores através de links M3U.',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 32),
         ],
       ),
     );
@@ -245,12 +330,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _sectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         title.toUpperCase(),
         style: const TextStyle(
           color: AppColors.accent,
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.5,
         ),
@@ -258,11 +343,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // Componente Premium: Cartão de agrupamento visual de opções
+  Widget _buildCard({required List<Widget> children}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.darkGray.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.mediumGray.withValues(alpha: 0.15),
+          width: 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      color: AppColors.mediumGray.withValues(alpha: 0.15),
+    );
+  }
+
   Widget _infoTile(String label, String value) {
-    return ListTile(
-      dense: true,
-      title: Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
-      trailing: Text(value, style: const TextStyle(color: AppColors.white, fontSize: 13)),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 14)),
+          Text(value, style: const TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+        ],
+      ),
     );
   }
 
@@ -270,21 +389,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
+    required Widget trailing,
     required VoidCallback onTap,
   }) {
     return ListTile(
-      leading: Icon(icon, color: AppColors.textMuted),
-      title: Text(title, style: const TextStyle(color: AppColors.white, fontSize: 14)),
-      subtitle: Text(subtitle, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-      trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-      onTap: onTap,
-    );
-  }
-
-  Widget _settingsTile({required String title, required String subtitle}) {
-    return ListTile(
-      title: Text(title, style: const TextStyle(color: AppColors.white, fontSize: 14)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: AppColors.accent, size: 20),
+      ),
+      title: Text(title, style: const TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w500)),
       subtitle: Text(subtitle, style: const TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.4)),
+      trailing: trailing,
+      onTap: onTap,
     );
   }
 }
