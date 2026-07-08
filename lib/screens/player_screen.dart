@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_vlc_player/flutter_vlc_player.dart'; // Nova engine profissional
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/channel.dart';
 import '../utils/app_colors.dart';
@@ -21,7 +21,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMixin {
-  VlcPlayerController? _controller; // Controller atualizado para VLC
+  VlcPlayerController? _controller;
   
   bool _isControlsVisible = true;
   bool _hasError = false;
@@ -32,7 +32,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   late AnimationController _controlsAnimController;
   late Animation<double> _controlsAnimation;
 
-  // Gestos e Formato
   AspectRatioMode _aspectRatioMode = AspectRatioMode.fit;
   double _volumeValue = 0.5;      
   double _brightnessValue = 0.5;  
@@ -40,7 +39,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   bool _showBrightnessIndicator = false;
   Timer? _indicatorTimer;
 
-  // Detecção Inteligente de TV ao Vivo vs Cinema VOD
   bool get _isLiveStream {
     final title = widget.channel.groupTitle.toLowerCase();
     return !title.contains('vod') &&
@@ -94,21 +92,20 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     try {
       final meta = await ChannelService.getChannelMeta(widget.channel.id);
       final List<String> vlcOptions = [
-        '--http-user-agent=VLC/3.0.18 LibVLC/3.0.18', // User-Agent universal compatível
-        '--network-caching=3000',                     // Buffer de rede de 3s contra travamentos
-        '--rtsp-tcp',                                 // Força tráfego RTP sobre TCP
-        '--drop-late-frames',                         // Ignora frames atrasados para manter áudio sincronizado
+        '--http-user-agent=VLC/3.0.18 LibVLC/3.0.18',
+        '--network-caching=3000',                     
+        '--rtsp-tcp',                                 
+        '--drop-late-frames',                         
         '--skip-frames',
       ];
 
-      // Aplica cabeçalhos VLC do M3U se existirem
       if (meta.containsKey('vlc-http-referrer')) {
         vlcOptions.add('--http-referrer=${meta['vlc-http-referrer']}');
       }
 
       final controller = VlcPlayerController.network(
         widget.channel.streamUrl,
-        hwAcc: HwAcc.full, // Ativa aceleração por Hardware máxima da GPU
+        hwAcc: HwAcc.auto, // CORREÇÃO: HwAcc.auto previne tela preta no Android 7.1.1
         autoPlay: true,
         options: VlcPlayerOptions(
           advanced: VlcAdvancedOptions(vlcOptions),
@@ -126,7 +123,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       if (mounted) {
         setState(() {
           _hasError = true;
-          _errorMessage = 'Falha crítica ao carregar a engine VLC.';
+          _errorMessage = 'Falha ao iniciar motor de descodificação de vídeo.';
         });
       }
     }
@@ -137,16 +134,14 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
     final value = _controller!.value;
 
-    // Detecta erros do player
     if (value.hasError) {
       setState(() {
         _hasError = true;
-        _errorMessage = value.errorDescription ?? 'Erro desconhecido na transmissão de rede.';
+        _errorMessage = value.errorDescription ?? 'O stream parou inesperadamente.';
       });
       return;
     }
 
-    // Monitora o estado de Buffer
     final isBuffering = value.playingState == PlayingState.buffering;
     if (isBuffering != _isBuffering) {
       setState(() {
@@ -154,7 +149,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       });
     }
 
-    // Atualiza a barra de progresso em tempo real se for VOD
     if (!_isLiveStream) {
       setState(() {});
     }
@@ -233,7 +227,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
         _showVolumeIndicator = false;
       } else {
         _volumeValue = (_volumeValue + dragDelta).clamp(0.0, 1.0);
-        // O volume do VLC é de 0 a 100 inteiros
         _controller?.setVolume((_volumeValue * 100).toInt());
         _showVolumeIndicator = true;
         _showBrightnessIndicator = false;
@@ -287,7 +280,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
             Center(
               child: _hasError
                   ? _buildErrorScreen()
-                  : _controller != null
+                  : _controller != null && _controller!.value.isInitialized
                       ? _buildVideoPlayerWrapper()
                       : const Center(
                           child: Column(
@@ -296,7 +289,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                               CircularProgressIndicator(color: AppColors.accent),
                               SizedBox(height: 16),
                               Text(
-                                'Conectando à engine VLC decoders...',
+                                'A carregar transmissão...',
                                 style: TextStyle(color: AppColors.lightGray),
                               ),
                             ],
@@ -340,6 +333,11 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   }
 
   Widget _buildVideoPlayerWrapper() {
+    // Tratamento rigoroso de AspectRatio para evitar crash de tamanho em ecrãs antigos
+    final double aspect = _controller!.value.aspectRatio <= 0 
+        ? 16 / 9 
+        : _controller!.value.aspectRatio;
+
     switch (_aspectRatioMode) {
       case AspectRatioMode.stretch:
         return SizedBox.expand(
@@ -354,11 +352,11 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
           child: FittedBox(
             fit: BoxFit.cover,
             child: SizedBox(
-              width: _controller!.value.size.width,
-              height: _controller!.value.size.height,
+              width: _controller!.value.size.width <= 0 ? 1280 : _controller!.value.size.width.toDouble(),
+              height: _controller!.value.size.height <= 0 ? 720 : _controller!.value.size.height.toDouble(),
               child: VlcPlayer(
                 controller: _controller!,
-                aspectRatio: _controller!.value.aspectRatio,
+                aspectRatio: aspect,
               ),
             ),
           ),
@@ -366,10 +364,11 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       case AspectRatioMode.fit:
       default:
         return AspectRatio(
-          aspectRatio: _controller!.value.aspectRatio,
+          aspectRatio: aspect,
           child: VlcPlayer(
             controller: _controller!,
-            aspectRatio: _controller!.value.aspectRatio,
+            aspectRatio: aspect,
+            placeholder: const Center(child: CircularProgressIndicator()),
           ),
         );
     }
@@ -518,7 +517,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!_isLiveStream && _controller != null) ...[
+                  if (!_isLiveStream && _controller != null && _controller!.value.isInitialized) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Row(
