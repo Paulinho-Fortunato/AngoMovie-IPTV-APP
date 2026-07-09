@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Lista de canais atualizada!'),
+          content: const Text('Lista de canais updated!'),
           backgroundColor: AppColors.background.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
@@ -197,11 +197,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Reduzido padding lateral
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: !_isSearchExpanded
                 ? Row(
                     children: [
-                      // Botão do Menu Lateral com toque responsivo
                       Builder(
                         builder: (context) => IconButton(
                           icon: const Icon(Icons.menu, color: AppColors.white),
@@ -210,16 +209,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           onPressed: () => Scaffold.of(context).openDrawer(),
                         ),
                       ),
-                      const SizedBox(width: 8), // Espaço reduzido seguro
+                      const SizedBox(width: 8),
                       
-                      // Logo Inteligente (Adapta o tamanho e evita quebrar em telas pequenas)
+                      // LOGO ATUALIZADA: Uso seguro de FontWeight.w900 (Peso Black real no Flutter)
                       const Expanded(
                         child: Text(
                           'ANGOMOVIE',
                           style: TextStyle(
                             color: AppColors.accent,
-                            fontSize: 17, // Tamanho otimizado extremamente elegante
-                            fontWeight: FontWeight.black, // Peso black para destaque visual
+                            fontSize: 17, 
+                            fontWeight: FontWeight.w900, 
                             letterSpacing: 1.5,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -227,7 +226,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       
-                      // Bloco de Ações Ultra Otimizado em espaço horizontal
                       IconButton(
                         icon: const Icon(Icons.search, color: AppColors.white, size: 22),
                         constraints: const BoxConstraints(),
@@ -338,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'Premium v1.2.0', // Corrigido de IPTV para Premium apenas
+                    'Premium v1.2.0',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                   ),
                 ],
@@ -360,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(
-                'AngoMovie © 2026', // Corrigido o copyright
+                'AngoMovie © 2026',
                 style: TextStyle(
                   color: AppColors.textMuted.withValues(alpha: 0.5),
                   fontSize: 11,
