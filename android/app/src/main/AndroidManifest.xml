@@ -1,19 +1,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.angomovie.angomovie_iptv">
 
+    <!-- Permissões cruciais para IPTV e streaming de vídeo -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/> 
 
+    <!-- Suporte para Smart TVs e TV Boxes (Leanback) -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.keyboard" android:required="false" />
 
     <application
-        android:label="AngoMovie IPTV"
+        android:label="AngoMovie"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:hardwareAccelerated="true"
+        
+        <!-- CORREÇÃO 1: Força a liberação de links HTTP de IPTV em modo Release -->
+        android:usesCleartextTraffic="true"
+        
+        <!-- CORREÇÃO 2: Apontando para as regras de rede (que corrigiremos no passo 2) -->
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/LaunchTheme">
         
@@ -36,6 +43,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
+            <!-- Launcher específico para Android TV / TV Box -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
