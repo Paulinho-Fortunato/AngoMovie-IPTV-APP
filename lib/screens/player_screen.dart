@@ -69,6 +69,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     _scheduleHideControls();
   }
 
+  // Liberar o controller de forma assíncrona com segurança
   Future<void> _disposeController() async {
     if (_controller != null) {
       _controller!.removeListener(_onPlayerStateChanged);
@@ -78,6 +79,36 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       await _controller!.dispose();
       _controller = null;
     }
+  }
+
+  // ESTE MÉTODO É A CHAVE! Executado sempre que a tela é fechada, por qualquer motivo.
+  @override
+  void dispose() {
+    // 1. Cancelar todos os Timers ativos para evitar vazamento de memória (Memory Leaks)
+    _hideControlsTimer?.cancel();
+    _indicatorTimer?.cancel();
+    _controlsAnimController.dispose();
+
+    // 2. Desativar Wakelock (deixar a tela apagar normalmente agora)
+    WakelockPlus.disable();
+
+    // 3. Destruir o Player de Vídeo VLC
+    final controllerToDispose = _controller;
+    if (controllerToDispose != null) {
+      controllerToDispose.removeListener(_onPlayerStateChanged);
+      controllerToDispose.stop().then((_) => controllerToDispose.dispose());
+    }
+
+    // 4. FORÇAR a rotação voltar para Vertical (Retrato) ao sair da tela
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+
+    // 5. Reativar as barras de status e navegação do celular
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    super.dispose();
   }
 
   Future<void> _initPlayer() async {
@@ -105,7 +136,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
       final controller = VlcPlayerController.network(
         widget.channel.streamUrl,
-        hwAcc: HwAcc.auto, // CORREÇÃO: HwAcc.auto previne tela preta no Android 7.1.1
+        hwAcc: HwAcc.auto, 
         autoPlay: true,
         options: VlcPlayerOptions(
           advanced: VlcAdvancedOptions(vlcOptions),
@@ -254,13 +285,8 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     return '${twoDigits(minutes)}:${twoDigits(seconds)}';
   }
 
-  Future<void> _exitPlayer() async {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    WakelockPlus.disable();
+  // Modificado: O Navigator apenas fecha a tela. O dispose() cuida do resto!
+  void _exitPlayer() {
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -333,7 +359,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   }
 
   Widget _buildVideoPlayerWrapper() {
-    // Tratamento rigoroso de AspectRatio para evitar crash de tamanho em ecrãs antigos
     final double aspect = _controller!.value.aspectRatio <= 0 
         ? 16 / 9 
         : _controller!.value.aspectRatio;
@@ -468,10 +493,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                 child: _isLiveStream
                     ? const SizedBox.shrink()
                     : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _TVControlWrapper(
-                            onTap: _rewind,
+                        mainAxisAlignment: Main => _rewind,
                             child: IconButton(
                               iconSize: 44,
                               icon: const Icon(Icons.replay_10_rounded, color: AppColors.white),
