@@ -197,30 +197,41 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Reduzido padding lateral
             child: !_isSearchExpanded
                 ? Row(
                     children: [
+                      // Botão do Menu Lateral com toque responsivo
                       Builder(
                         builder: (context) => IconButton(
                           icon: const Icon(Icons.menu, color: AppColors.white),
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(8),
                           onPressed: () => Scaffold.of(context).openDrawer(),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'ANGOMOVIE',
-                        style: TextStyle(
-                          color: AppColors.accent,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
+                      const SizedBox(width: 8), // Espaço reduzido seguro
+                      
+                      // Logo Inteligente (Adapta o tamanho e evita quebrar em telas pequenas)
+                      const Expanded(
+                        child: Text(
+                          'ANGOMOVIE',
+                          style: TextStyle(
+                            color: AppColors.accent,
+                            fontSize: 17, // Tamanho otimizado extremamente elegante
+                            fontWeight: FontWeight.black, // Peso black para destaque visual
+                            letterSpacing: 1.5,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
-                      const Spacer(),
-                      // Botão de Pesquisa Perfeitamente Espaçoso e Funcional
+                      
+                      // Bloco de Ações Ultra Otimizado em espaço horizontal
                       IconButton(
-                        icon: const Icon(Icons.search, color: AppColors.white),
+                        icon: const Icon(Icons.search, color: AppColors.white, size: 22),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                         onPressed: () {
                           setState(() {
                             _isSearchExpanded = true;
@@ -228,11 +239,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                       ),
                       IconButton(
-                        icon: const Icon(Icons.refresh, color: AppColors.white),
+                        icon: const Icon(Icons.refresh, color: AppColors.white, size: 22),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                         onPressed: _refreshChannels,
                       ),
                       IconButton(
-                        icon: const Icon(Icons.settings, color: AppColors.white),
+                        icon: const Icon(Icons.settings, color: AppColors.white, size: 22),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.only(left: 8, right: 4, top: 8, bottom: 8),
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(builder: (_) => const SettingsScreen()),
@@ -245,6 +260,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.arrow_back, color: AppColors.white),
+                        constraints: const BoxConstraints(),
+                        padding: const EdgeInsets.all(8),
                         onPressed: () {
                           setState(() {
                             _isSearchExpanded = false;
@@ -256,29 +273,32 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Container(
-                          height: 44,
+                          height: 40,
                           decoration: BoxDecoration(
                             color: AppColors.mediumGray.withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(22),
+                            borderRadius: BorderRadius.circular(20),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: TextField(
                             controller: _searchController,
-                            autofocus: true, // Abre o teclado na TV/Celular automaticamente
+                            autofocus: true,
                             onChanged: _onSearchChanged,
                             style: const TextStyle(color: AppColors.white, fontSize: 14),
                             decoration: const InputDecoration(
                               hintText: 'Pesquise canais, filmes...',
                               hintStyle: TextStyle(color: AppColors.textMuted),
                               border: InputBorder.none,
+                              isDense: true,
                             ),
                           ),
                         ),
                       ),
                       if (_searchController.text.isNotEmpty) ...[
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         IconButton(
-                          icon: const Icon(Icons.clear, color: AppColors.white),
+                          icon: const Icon(Icons.clear, color: AppColors.white, size: 20),
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(8),
                           onPressed: () {
                             _searchController.clear();
                             context.read<ChannelProvider>().clearSearch();
@@ -311,13 +331,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     'ANGOMOVIE',
                     style: TextStyle(
                       color: AppColors.accent,
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 2,
                     ),
                   ),
+                  SizedBox(height: 4),
                   Text(
-                    'IPTV Premium v1.2.0',
+                    'Premium v1.2.0', // Corrigido de IPTV para Premium apenas
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                   ),
                 ],
@@ -339,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(
-                'AngoMovie IPTV © 2026',
+                'AngoMovie © 2026', // Corrigido o copyright
                 style: TextStyle(
                   color: AppColors.textMuted.withValues(alpha: 0.5),
                   fontSize: 11,
