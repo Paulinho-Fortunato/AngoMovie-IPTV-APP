@@ -1,4 +1,4 @@
-name: Build Flutter APK
+name: Build AngoMovie APK
 
 on:
   push:
@@ -21,10 +21,22 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
+      # Caching do Gradle para acelerar as compilações futuras no GitHub
+      - name: Gradle Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true # Ativa o cache nativo do SDK do Flutter
 
       - name: Install dependencies
         run: flutter pub get
@@ -32,13 +44,17 @@ jobs:
       - name: Generate Hive Adapters
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # COMPILAÇÃO UNIVERSAL: Gera apenas um arquivo "app-release.apk" compatível com qualquer celular/TV
+      # COMPILAÇÃO INTELIGENTE: Divide o APK por arquiteturas, reduzindo o tamanho em até 70%!
       - name: Build APK
         run: |
-          flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols
+          flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols
 
-      - name: Upload APK
+      # Upload dos arquivos divididos (Muito menores e otimizados)
+      - name: Upload APKs Otimizados
         uses: actions/upload-artifact@v4
         with:
-          name: AngoMovie-IPTV-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: AngoMovie-Release-APKs
+          path: |
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
