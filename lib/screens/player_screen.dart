@@ -82,28 +82,28 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
   @override
   void dispose() {
-    // 1. Cancelar todos os Timers ativos para evitar vazamento de memória (Memory Leaks)
+    // 1. Cancelar todos os Timers e Controladores para liberar memória
     _hideControlsTimer?.cancel();
     _indicatorTimer?.cancel();
     _controlsAnimController.dispose();
 
-    // 2. Desativar Wakelock
+    // 2. Permitir que a tela do telemóvel volte a apagar normalmente
     WakelockPlus.disable();
 
-    // 3. Destruir o Player de Vídeo VLC
+    // 3. Destruir de forma segura o player VLC
     final controllerToDispose = _controller;
     if (controllerToDispose != null) {
       controllerToDispose.removeListener(_onPlayerStateChanged);
       controllerToDispose.stop().then((_) => controllerToDispose.dispose());
     }
 
-    // 4. FORÇAR a rotação voltar para Vertical (Retrato) ao sair da tela
+    // 4. FORÇAR a orientação a voltar para Vertical (Retrato) ao sair
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
 
-    // 5. Reativar as barras de status e navegação do celular
+    // 5. Restaurar as barras do sistema operacional
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     super.dispose();
@@ -134,7 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
       final controller = VlcPlayerController.network(
         widget.channel.streamUrl,
-        hwAcc: HwAcc.auto, 
+        hwAcc: HwAcc.disabled, // CORREÇÃO: Evita carregamento infinito em modo Release
         autoPlay: true,
         options: VlcPlayerOptions(
           advanced: VlcAdvancedOptions(vlcOptions),
@@ -677,173 +677,4 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               const SizedBox(height: 4),
               Text(
                 'Se preferir, pode abrir o fluxo em um player externo especializado:',
-                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.7), fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _TVControlWrapper(
-                    onTap: () async {
-                      final success = await ExternalPlayerService.playInVlc(widget.channel);
-                      if (!success && mounted) {
-                        _showInfoSnackBar('Instale o VLC Player na Google Play Store.');
-                      }
-                    },
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final success = await ExternalPlayerService.playInVlc(widget.channel);
-                        if (!success && mounted) {
-                          _showInfoSnackBar('Instale o VLC Player na Google Play Store.');
-                        }
-                      },
-                      icon: const Icon(Icons.play_circle_fill_rounded, size: 16),
-                      label: const Text('Abrir no VLC'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange.shade800,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  _TVControlWrapper(
-                    onTap: () async {
-                      final success = await ExternalPlayerService.playInMxPlayer(widget.channel);
-                      if (!success && mounted) {
-                        _showInfoSnackBar('Instale o MX Player na Google Play Store.');
-                      }
-                    },
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final success = await ExternalPlayerService.playInMxPlayer(widget.channel);
-                        if (!success && mounted) {
-                          _showInfoSnackBar('Instale o MX Player na Google Play Store.');
-                        }
-                      },
-                      icon: const Icon(Icons.play_circle_fill_rounded, size: 16),
-                      label: const Text('Abrir no MX Player'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade800,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              
-              const SizedBox(height: 24),
-              
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _TVControlWrapper(
-                    onTap: _exitPlayer,
-                    child: OutlinedButton.icon(
-                      onPressed: _exitPlayer,
-                      icon: const Icon(Icons.arrow_back, size: 16),
-                      label: const Text('Voltar'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.white,
-                        side: const BorderSide(color: AppColors.white),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  _TVControlWrapper(
-                    onTap: () {
-                      setState(() => _hasError = false);
-                      _initPlayer();
-                    },
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        setState(() => _hasError = false);
-                        _initPlayer();
-                      },
-                      icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('Tentar Novamente'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.accent,
-                        foregroundColor: AppColors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showInfoSnackBar(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: AppColors.background.withValues(alpha: 0.9),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-}
-
-class _TVControlWrapper extends StatefulWidget {
-  final Widget child;
-  final VoidCallback onTap;
-
-  const _TVControlWrapper({required this.child, required this.onTap});
-
-  @override
-  State<_TVControlWrapper> createState() => _TVControlWrapperState();
-}
-
-class _TVControlWrapperState extends State<_TVControlWrapper> {
-  bool _isFocused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (focus) => setState(() => _isFocused = focus),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          final key = event.logicalKey;
-          if (key == LogicalKeyboardKey.enter ||
-              key == LogicalKeyboardKey.select ||
-              key == LogicalKeyboardKey.space) {
-            widget.onTap();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: AnimatedScale(
-        scale: _isFocused ? 1.15 : 1.0,
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeInOut,
-        child: Container(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            boxShadow: _isFocused
-                ? [
-                    BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.6),
-                      blurRadius: 14,
-                      spreadRadius: 3,
-                    )
-                  ]
-                : [],
-          ),
-          child: widget.child,
-        ),
-      ),
-    );
-  }
-}
+                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 
