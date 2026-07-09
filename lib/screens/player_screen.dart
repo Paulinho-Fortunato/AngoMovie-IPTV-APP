@@ -82,28 +82,28 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
   @override
   void dispose() {
-    // 1. Cancela todos os Timers para evitar Memory Leaks
+    // 1. Cancelar todos os Timers ativos para evitar vazamento de memória (Memory Leaks)
     _hideControlsTimer?.cancel();
     _indicatorTimer?.cancel();
     _controlsAnimController.dispose();
 
-    // 2. Desativa o Wakelock de forma limpa
+    // 2. Desativar Wakelock
     WakelockPlus.disable();
 
-    // 3. Libera o controller do VLC da memória
+    // 3. Destruir o Player de Vídeo VLC
     final controllerToDispose = _controller;
     if (controllerToDispose != null) {
       controllerToDispose.removeListener(_onPlayerStateChanged);
       controllerToDispose.stop().then((_) => controllerToDispose.dispose());
     }
 
-    // 4. Força a restauração para a orientação Vertical
+    // 4. FORÇAR a rotação voltar para Vertical (Retrato) ao sair da tela
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
 
-    // 5. Restaura o modo de exibição das barras do sistema
+    // 5. Reativar as barras de status e navegação do celular
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     super.dispose();
@@ -738,7 +738,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               const SizedBox(height: 24),
               
               Row(
-                mainAxisAlignment: Main => _exitPlayer,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _TVControlWrapper(
                     onTap: _exitPlayer,
