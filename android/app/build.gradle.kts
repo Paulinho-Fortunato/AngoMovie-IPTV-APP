@@ -28,6 +28,16 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    // =========================================================================
+    // CORREÇÃO CRÍTICA 1: Força o empacotamento tradicional de binários .so (C++)
+    // Isso evita o erro de UnsatisfiedLinkError e destrava o VLC no Gradle 8.x+
+    // =========================================================================
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     signingConfigs {
         create("release") {
             keyAlias = keyProperties["keyAlias"] as String? ?: "release"
@@ -39,7 +49,10 @@ android {
 
     defaultConfig {
         applicationId = "com.angomovie.angomovie_iptv"
-        minSdk = flutter.minSdkVersion
+        
+        // CORREÇÃO CRÍTICA 2: Garante suporte mínimo ao VLC (Requer Android 5.0+)
+        minSdk = 21 
+        
         targetSdk = flutter.targetSdkVersion
         versionCode = 3
         versionName = "1.2.0"
