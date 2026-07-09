@@ -69,7 +69,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     _scheduleHideControls();
   }
 
-  // Liberar o controller de forma assíncrona com segurança
   Future<void> _disposeController() async {
     if (_controller != null) {
       _controller!.removeListener(_onPlayerStateChanged);
@@ -81,31 +80,30 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     }
   }
 
-  // ESTE MÉTODO É A CHAVE! Executado sempre que a tela é fechada, por qualquer motivo.
   @override
   void dispose() {
-    // 1. Cancelar todos os Timers ativos para evitar vazamento de memória (Memory Leaks)
+    // 1. Cancela todos os Timers para evitar Memory Leaks
     _hideControlsTimer?.cancel();
     _indicatorTimer?.cancel();
     _controlsAnimController.dispose();
 
-    // 2. Desativar Wakelock (deixar a tela apagar normalmente agora)
+    // 2. Desativa o Wakelock de forma limpa
     WakelockPlus.disable();
 
-    // 3. Destruir o Player de Vídeo VLC
+    // 3. Libera o controller do VLC da memória
     final controllerToDispose = _controller;
     if (controllerToDispose != null) {
       controllerToDispose.removeListener(_onPlayerStateChanged);
       controllerToDispose.stop().then((_) => controllerToDispose.dispose());
     }
 
-    // 4. FORÇAR a rotação voltar para Vertical (Retrato) ao sair da tela
+    // 4. Força a restauração para a orientação Vertical
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
 
-    // 5. Reativar as barras de status e navegação do celular
+    // 5. Restaura o modo de exibição das barras do sistema
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     super.dispose();
@@ -285,7 +283,6 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     return '${twoDigits(minutes)}:${twoDigits(seconds)}';
   }
 
-  // Modificado: O Navigator apenas fecha a tela. O dispose() cuida do resto!
   void _exitPlayer() {
     if (mounted) Navigator.of(context).pop();
   }
@@ -493,7 +490,10 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                 child: _isLiveStream
                     ? const SizedBox.shrink()
                     : Row(
-                        mainAxisAlignment: Main => _rewind,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _TVControlWrapper(
+                            onTap: _rewind,
                             child: IconButton(
                               iconSize: 44,
                               icon: const Icon(Icons.replay_10_rounded, color: AppColors.white),
@@ -738,7 +738,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               const SizedBox(height: 24),
               
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: Main => _exitPlayer,
                 children: [
                   _TVControlWrapper(
                     onTap: _exitPlayer,
