@@ -16,11 +16,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:hardwareAccelerated="true"
-        
-        <!-- CORREÇÃO 1: Força a liberação de links HTTP de IPTV em modo Release -->
         android:usesCleartextTraffic="true"
-        
-        <!-- CORREÇÃO 2: Apontando para as regras de rede (que corrigiremos no passo 2) -->
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/LaunchTheme">
         
