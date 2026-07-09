@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Permite tráfego HTTP limpo para qualquer domínio/IPTV -->
+    <!-- Permite que o VLC Player faça downloads e carregue streams HTTP sem SSL -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
