@@ -1,4 +1,3 @@
-// lib/screens/player_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -82,28 +81,23 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
   @override
   void dispose() {
-    // 1. Cancelar todos os Timers ativos para evitar vazamento de memória (Memory Leaks)
     _hideControlsTimer?.cancel();
     _indicatorTimer?.cancel();
     _controlsAnimController.dispose();
 
-    // 2. Desativar Wakelock
     WakelockPlus.disable();
 
-    // 3. Destruir o Player de Vídeo VLC
     final controllerToDispose = _controller;
     if (controllerToDispose != null) {
       controllerToDispose.removeListener(_onPlayerStateChanged);
       controllerToDispose.stop().then((_) => controllerToDispose.dispose());
     }
 
-    // 4. FORÇAR a rotação voltar para Vertical (Retrato) ao sair da tela
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
 
-    // 5. Reativar as barras de status e navegação do celular
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     super.dispose();
@@ -134,7 +128,8 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
       final controller = VlcPlayerController.network(
         widget.channel.streamUrl,
-        hwAcc: HwAcc.disabled, 
+        // CORREÇÃO AQUI: Mudamos de .disabled para .auto para ativar descodificação por hardware nativa
+        hwAcc: HwAcc.auto, 
         autoPlay: true,
         options: VlcPlayerOptions(
           advanced: VlcAdvancedOptions(vlcOptions),
@@ -146,7 +141,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
       _controller = controller;
       _controller!.addListener(_onPlayerStateChanged);
-      setState(() {});
+      if (mounted) setState(() {});
       
     } catch (e) {
       if (mounted) {
@@ -264,10 +259,12 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
 
     _indicatorTimer?.cancel();
     _indicatorTimer = Timer(const Duration(milliseconds: 1200), () {
-      setState(() {
-        _showBrightnessIndicator = false;
-        _showVolumeIndicator = false;
-      });
+      if (mounted) {
+        setState(() {
+          _showBrightnessIndicator = false;
+          _showVolumeIndicator = false;
+        });
+      }
     });
   }
 
@@ -325,7 +322,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
+                    color: Colors.black.withAlpha(128),
                     shape: BoxShape.circle,
                   ),
                   child: const CircularProgressIndicator(color: AppColors.accent),
@@ -404,9 +401,9 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.75),
+          color: Colors.black.withAlpha(192),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.white.withValues(alpha: 0.1), width: 1),
+          border: Border.all(color: AppColors.white.withAlpha(25), width: 1),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -508,7 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                               height: 70,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: AppColors.accent.withValues(alpha: 0.85),
+                                color: AppColors.accent.withAlpha(216),
                               ),
                               child: IconButton(
                                 iconSize: 40,
@@ -554,7 +551,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
                               child: SliderTheme(
                                 data: SliderTheme.of(context).copyWith(
                                   activeTrackColor: AppColors.accent,
-                                  inactiveTrackColor: AppColors.mediumGray.withValues(alpha: 0.3),
+                                  inactiveTrackColor: AppColors.mediumGray.withAlpha(76),
                                   thumbColor: AppColors.accent,
                                   trackHeight: 4,
                                   thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
@@ -625,7 +622,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
           borderRadius: BorderRadius.circular(6),
           boxShadow: [
             BoxShadow(
-              color: Colors.red.shade700.withValues(alpha: 0.4),
+              color: Colors.red.shade700.withAlpha(102),
               blurRadius: 6,
               spreadRadius: 1,
             )
@@ -646,9 +643,9 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: AppColors.accent.withValues(alpha: 0.15),
+          color: AppColors.accent.withAlpha(38),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppColors.accent.withValues(alpha: 0.3), width: 1),
+          border: Border.all(color: AppColors.accent.withAlpha(76), width: 1),
         ),
         child: const Text(
           'VOD CINEMA',
@@ -677,7 +674,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
               const SizedBox(height: 4),
               Text(
                 'Se preferir, pode abrir o fluxo em um player externo especializado:',
-                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.7), fontSize: 12),
+                style: TextStyle(color: AppColors.textMuted.withAlpha(178), fontSize: 12),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -788,7 +785,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: AppColors.background.withValues(alpha: 0.9),
+        backgroundColor: AppColors.background.withAlpha(230),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -834,7 +831,7 @@ class _TVControlWrapperState extends State<_TVControlWrapper> {
             boxShadow: _isFocused
                 ? [
                     BoxShadow(
-                      color: AppColors.accent.withValues(alpha: 0.6),
+                      color: AppColors.accent.withAlpha(153),
                       blurRadius: 14,
                       spreadRadius: 3,
                     )
