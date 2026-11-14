@@ -11,6 +11,7 @@ import '../services/update_service.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'privacy_screen.dart';
+import 'watch_history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -343,6 +344,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             _drawerItem(Icons.home_outlined, 'Início', () => Navigator.pop(context)),
+            _drawerItem(Icons.history, 'Histórico de visualização', () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WatchHistoryScreen()),
+              );
+            }),
             _drawerItem(Icons.settings_outlined, 'Configurações', () {
               Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));

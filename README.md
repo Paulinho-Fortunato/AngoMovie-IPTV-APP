@@ -7,10 +7,10 @@ App de TV ao vivo no estilo Netflix para Android. Interface moderna com carregam
 - **Interface Netflix**: Tela principal com linhas horizontais por categoria
 - **Player de Vídeo**: Suporte a HLS, MP4, TS com todos os codecs (H.264, H.265, AAC, AC-3)
 - **Tela de Carregamento**: Animação estilo streaming com indicador circular
-- **Cache Local**: Canais salvos com Hive (sem re-download a cada abertura)
+- **Cache Local**: Lista/canais em Hive; favoritos e histórico persistidos em Room no Android (API 21+).
 - **Busca**: Filtro em tempo real por nome/categoria (debounce 350ms)
 - **Aviso de Privacidade**: Exibido na primeira abertura
-- **Segurança**: R8/ProGuard ativado no release, rede restrita a domínios autorizados
+- **Segurança**: R8/ProGuard ativado no release; não aceita certificados TLS inválidos; HTTP legado continua disponível para listas que o exijam.
 - **Configurações**: Gerenciar cache, privacidade e segurança de conexão
 
 ## 📦 Versão
@@ -25,11 +25,12 @@ App de TV ao vivo no estilo Netflix para Android. Interface moderna com carregam
 |------------------|--------------------|
 | Framework        | Flutter 3.35.4     |
 | Linguagem        | Dart 3.9.2         |
-| Player           | video_player 2.x   |
-| Cache            | Hive 2.2.3         |
+| Player           | flutter_vlc_player 7.x |
+| Cache de canais  | Hive 2.2.3         |
+| Favoritos/histórico Android | Room 2.6.1 |
 | Imagens          | cached_network_image |
 | Estado           | Provider 6.x       |
-| HTTP             | http + dio         |
+| HTTP             | http 1.x           |
 | Backend          | FastAPI + httpx    |
 
 ## 🚀 Build
@@ -55,8 +56,13 @@ flutter install
 ```bash
 cd backend/
 pip install -r requirements.txt
+# Defina apenas uma playlist à qual tem autorização de acesso/distribuição.
+# Prefira HTTPS e mantenha a URL/credenciais fora do Git e dos logs.
+export ANGOMOVIE_M3U_URL='https://provider-authorized.example/playlist.m3u'
 python server.py
 ```
+
+O backend não tem uma playlist ou credenciais padrão; sem `ANGOMOVIE_M3U_URL`, não faz pedidos à fonte.
 
 API disponível em `http://localhost:8000`:
 - `GET /api/channels` – Lista de canais ao vivo
@@ -71,15 +77,18 @@ lib/
 ├── main.dart                 # Ponto de entrada
 ├── models/
 │   ├── channel.dart          # Modelo de canal
-│   └── channel.g.dart        # Adaptador Hive (gerado)
+│   ├── channel.g.dart        # Adaptador Hive (gerado)
+│   └── watch_history_entry.dart # Modelo de histórico
 ├── services/
 │   ├── channel_service.dart  # Cache e fetch de canais
+│   ├── local_media_store.dart # Bridge Room/fallback multiplataforma
 │   └── m3u_parser.dart       # Parser M3U+ com filtros
 ├── providers/
-│   └── channel_provider.dart # Estado global
+│   └── channel_provider.dart # Estado global e dados pessoais locais
 ├── screens/
 │   ├── splash_screen.dart    # Tela de carregamento
 │   ├── home_screen.dart      # Tela principal
+│   ├── watch_history_screen.dart # Histórico de reprodução
 │   ├── player_screen.dart    # Player de vídeo
 │   ├── settings_screen.dart  # Configurações
 │   └── privacy_screen.dart   # Aviso de privacidade
@@ -95,12 +104,26 @@ lib/
 ## 🔒 Segurança
 
 - **R8/ProGuard**: Minificação e obfuscação no release
-- **Rede**: `network_security_config.xml` restringe cleartext a domínios autorizados
-- **Sem Logs**: `Log.d` removido via ProGuard no release
-- **Dados Locais**: Hive com dados estruturados (não em texto plano)
+- **TLS**: o cliente já não aceita certificados expirados, autoassinados ou inválidos por omissão.
+- **HTTP legado**: o projeto ainda permite cleartext para streams IPTV antigos. O HTTP não cifra URL nem credenciais; usa apenas uma fonte autorizada, preferindo HTTPS.
+- **Dados Locais**: o cache de canais continua em Hive; Room guarda metadados de favoritos/histórico sem URLs de stream. A base Room é privada à aplicação, mas não cifrada.
 
 ## 📡 Fonte de Dados
 
-- **M3U**: `http://nitidez.pro:80/get.php?username=Marcio&password=123456&type=m3u_plus`
-- 
-- **Cache TTL**: Indefinido (só atualiza quando o usuário solicitar)
+- **M3U**: configure uma URL de playlist autorizada nas definições da aplicação. Não inclua credenciais no código-fonte, documentação, logs ou repositório. O backend opcional recebe a URL pelo segredo de ambiente `ANGOMOVIE_M3U_URL`; prefere HTTPS. HTTP só deve ser usado quando exigido pelo serviço autorizado e transmite a URL sem cifragem.
+- **Cache**: a lista de canais usa Hive; Room guarda metadados dos favoritos e o histórico no Android. URLs de stream não são copiadas para as tabelas Room. Limpar o cache de canais não elimina favoritos nem histórico.
+- **Compatibilidade**: minSdk 21; inclui Android 7.1/API 25. Room 2.6.1.
+
+## Persistência local Android
+
+A base Room `angomovie_local_media.db` é criada automaticamente. Favoritos são migrados uma vez do antigo campo Hive `isFavorite`. O histórico guarda até 100 canais distintos, a última data de reprodução e o número de reproduções; uma entrada é gravada quando o player reporta que a reprodução começou. Não são persistidos nesta base a URL M3U nem URLs de stream. Os dados são privados da aplicação, mas o SQLite não está cifrado — não guardes nesta base dados secretos.
+
+Testes:
+
+```bash
+flutter test
+# Com Java 17, Gradle 8.12 e um dispositivo/emulador Android ligado:
+gradle -p android :app:connectedDebugAndroidTest
+```
+
+Os testes Room são instrumentados e precisam de um dispositivo/emulador; também podem ser executados pela tarefa `:app:connectedDebugAndroidTest` no Android Studio.

@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:isolate';
 import '../models/channel.dart';
+import '../models/watch_history_entry.dart';
 import '../services/channel_service.dart';
+import '../services/local_media_store.dart';
 
 enum LoadingState { idle, loading, success, error }
 
@@ -15,6 +17,7 @@ class ChannelProvider extends ChangeNotifier {
   String _errorMessage = '';
   String _searchQuery = '';
   Channel? _featuredChannel;
+  List<WatchHistoryEntry> _watchHistory = [];
   
   int _loadedCategoriesCount = 0;
   int _categoriesPerBatch = 6; 
@@ -26,6 +29,7 @@ class ChannelProvider extends ChangeNotifier {
   LoadingState get state => _state;
   String get errorMessage => _errorMessage;
   Channel? get featuredChannel => _featuredChannel;
+  List<WatchHistoryEntry> get watchHistory => List.unmodifiable(_watchHistory);
   bool get isLoading => _state == LoadingState.loading;
   bool get hasError => _state == LoadingState.error;
   bool get hasData => _allChannels.isNotEmpty;
@@ -45,6 +49,7 @@ class ChannelProvider extends ChangeNotifier {
     try {
       final channels = await _loadChannelsSecure(forceRefresh);
       _allChannels = channels;
+      await _restoreLocalMediaState(channels);
       _featuredChannel = channels.isNotEmpty ? channels.first : null;
       
       if (channels.isNotEmpty) {
@@ -61,6 +66,69 @@ class ChannelProvider extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  /// Restores Room-backed favorites/history after the channel cache is loaded.
+  /// A Room outage must not prevent the cached playlist from being used.
+  Future<void> _restoreLocalMediaState(List<Channel> channels) async {
+    final legacyFavoriteIds = channels
+        .where((channel) => channel.isFavorite)
+        .map((channel) => channel.id)
+        .toSet();
+    var legacyMigrationCompleted = false;
+    try {
+      await LocalMediaStore.migrateLegacyFavorites(channels);
+      legacyMigrationCompleted = true;
+    } catch (error) {
+      if (kDebugMode) debugPrint('Migração de favoritos locais falhou: $error');
+    }
+
+    try {
+      final favoriteIds = await LocalMediaStore.getFavoriteIds();
+      // Keep pre-Room favorites visible if their one-time import could not finish.
+      if (!legacyMigrationCompleted) favoriteIds.addAll(legacyFavoriteIds);
+      for (final channel in channels) {
+        channel.isFavorite = favoriteIds.contains(channel.id);
+      }
+    } catch (error) {
+      if (kDebugMode) debugPrint('Leitura de favoritos locais falhou: $error');
+    }
+
+    await loadWatchHistory(notify: false);
+  }
+
+  Future<void> loadWatchHistory({bool notify = true}) async {
+    try {
+      _watchHistory = await LocalMediaStore.getWatchHistory();
+      if (notify) notifyListeners();
+    } catch (error) {
+      if (kDebugMode) debugPrint('Leitura do histórico local falhou: $error');
+    }
+  }
+
+  /// Adds a channel to the history only after the player reports playback.
+  Future<void> recordPlayback(Channel channel) async {
+    try {
+      final entry = await LocalMediaStore.recordPlayback(channel);
+      _watchHistory = <WatchHistoryEntry>[
+        entry,
+        ..._watchHistory.where((item) => item.channelId != entry.channelId),
+      ].take(100).toList(growable: false);
+      notifyListeners();
+    } catch (error) {
+      if (kDebugMode) debugPrint('Gravação do histórico local falhou: $error');
+    }
+  }
+
+  Future<void> clearWatchHistory() async {
+    try {
+      await LocalMediaStore.clearWatchHistory();
+      _watchHistory = [];
+      notifyListeners();
+    } catch (error) {
+      if (kDebugMode) debugPrint('Limpeza do histórico local falhou: $error');
+      rethrow;
+    }
   }
 
   /// Gerenciamento inteligente de Isolates para evitar bloqueios de UI
@@ -129,32 +197,27 @@ class ChannelProvider extends ChangeNotifier {
     }
   }
 
-  /// Alterna o estado de favoritos de forma instantânea e atualiza a categoria virtual
+  /// Persists the favorite in Room on Android, then updates the virtual category.
   Future<void> toggleFavorite(Channel channel) async {
-    channel.isFavorite = !channel.isFavorite;
-    await channel.save(); // Salva de forma síncrona no Hive
-    
-    _updateFavoritesInMap();
-    notifyListeners();
+    try {
+      channel.isFavorite = await LocalMediaStore.toggleFavorite(channel);
+      _updateFavoritesInMap();
+      notifyListeners();
+    } catch (error) {
+      if (kDebugMode) debugPrint('Não foi possível guardar o favorito: $error');
+    }
   }
 
-  /// Atualiza apenas a categoria virtual sem precisar reconstruir toda a estrutura do app
+  /// Rebuilds the virtual category first so favorites always remain at the top.
   void _updateFavoritesInMap() {
-    final favorites = _allChannels.where((c) => c.isFavorite).toList();
-    
-    if (favorites.isNotEmpty) {
-      _categorizedChannels['★ Favoritos'] = favorites;
-      
-      // Garante que os favoritos apareçam na primeira posição
-      if (!_categorizedChannels.containsKey('★ Favoritos')) {
-        final Map<String, List<Channel>> tempMap = {'★ Favoritos': favorites};
-        tempMap.addAll(_categorizedChannels);
-        _categorizedChannels = tempMap;
-      }
-    } else {
-      // Se não houver nenhum favorito ativo, remove a categoria virtual do ecrã
-      _categorizedChannels.remove('★ Favoritos');
+    final favorites = _allChannels.where((channel) => channel.isFavorite).toList();
+    final updated = <String, List<Channel>>{};
+
+    if (favorites.isNotEmpty) updated['★ Favoritos'] = favorites;
+    for (final entry in _categorizedChannels.entries) {
+      if (entry.key != '★ Favoritos') updated[entry.key] = entry.value;
     }
+    _categorizedChannels = updated;
   }
 
   void loadAllCategories() {
@@ -169,11 +232,10 @@ class ChannelProvider extends ChangeNotifier {
     }
 
     final favorites = _allChannels.where((c) => c.isFavorite).toList();
-    if (favorites.isNotEmpty) {
-      _categorizedChannels['★ Favoritos'] = favorites;
-    }
-
-    _categorizedChannels.addAll(groupedMap);
+    final orderedCategories = <String, List<Channel>>{};
+    if (favorites.isNotEmpty) orderedCategories['★ Favoritos'] = favorites;
+    orderedCategories.addAll(groupedMap);
+    _categorizedChannels = orderedCategories;
     _loadedCategoriesCount = _categorizedChannels.length;
     notifyListeners();
   }

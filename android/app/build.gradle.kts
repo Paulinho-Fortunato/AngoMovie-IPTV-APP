@@ -4,6 +4,7 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    id("org.jetbrains.kotlin.kapt")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -49,6 +50,7 @@ android {
 
     defaultConfig {
         applicationId = "com.angomovie.angomovie_iptv"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         // CORREÇÃO CRÍTICA 2: Garante suporte mínimo ao VLC (Requer Android 5.0+)
         minSdk = 21 
@@ -76,6 +78,22 @@ android {
             isMinifyEnabled = false
         }
     }
+
+}
+
+dependencies {
+    // Room 2.6.x supports the existing Android 5+ baseline (including API 25).
+    implementation("androidx.room:room-runtime:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.room:room-testing:2.6.1")
+}
+
+kapt {
+    correctErrorTypes = true
 }
 
 flutter {

@@ -69,7 +69,7 @@ class ChannelService {
     } else {
       final normalized = _normalizeUrl(url);
       await prefs.setString(_m3uPrefKey, normalized);
-      if (kDebugMode) debugPrint('🔧 Link M3U configurado para: $normalized');
+      if (kDebugMode) debugPrint('🔧 Fonte M3U personalizada configurada.');
     }
   }
 
@@ -107,7 +107,7 @@ class ChannelService {
       final hideVod = await getHideVod();
 
       if (kDebugMode) {
-        debugPrint('📡 Conectando ao servidor: $m3uUrl | Filtro de VOD: $hideVod');
+        debugPrint('📡 A sincronizar a lista M3U configurada | Filtro de VOD: $hideVod');
       }
 
       // Aumentado o Timeout para 60 segundos para suportar listas Xtream gigantes (20MB+)
@@ -176,7 +176,9 @@ class ChannelService {
         throw Exception('Servidor IPTV respondeu com erro HTTP ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('❌ Erro no sincronismo de rede: $e');
+      if (kDebugMode) {
+        debugPrint('❌ Erro no sincronismo de rede (${e.runtimeType}).');
+      }
 
       final box = _channelBox ?? await Hive.openBox<Channel>('channels');
       if (box.isNotEmpty) {

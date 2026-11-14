@@ -293,7 +293,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _actionTile(
                 icon: Icons.delete_sweep_outlined,
                 title: 'Limpar Cache de Streams',
-                subtitle: _isClearing ? 'A redefinir base de dados...' : 'Remove dados locais e sincroniza novamente.',
+                subtitle: _isClearing ? 'A redefinir cache da lista...' : 'Limpa a lista em cache e sincroniza novamente. Favoritos e histórico são preservados.',
                 trailing: _isClearing 
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent))
                   : const Icon(Icons.chevron_right, color: AppColors.textMuted),

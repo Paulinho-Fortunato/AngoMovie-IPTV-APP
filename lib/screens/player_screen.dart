@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_vlc_player/flutter_vlc_player.dart';
+import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/channel.dart';
 import '../utils/app_colors.dart';
 import '../services/channel_service.dart';
 import '../services/external_player_service.dart';
+import '../providers/channel_provider.dart';
 
 enum AspectRatioMode { fit, stretch, zoom }
 
@@ -25,6 +27,7 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
   bool _isControlsVisible = true;
   bool _hasError = false;
   bool _isBuffering = false;
+  bool _historyRecorded = false;
   String _errorMessage = '';
   
   Timer? _hideControlsTimer;
@@ -157,6 +160,11 @@ class _PlayerScreenState extends State<PlayerScreen> with TickerProviderStateMix
     if (_controller == null || !mounted) return;
 
     final value = _controller!.value;
+
+    if (value.isPlaying && !_historyRecorded) {
+      _historyRecorded = true;
+      context.read<ChannelProvider>().recordPlayback(widget.channel);
+    }
 
     if (value.hasError) {
       setState(() {
