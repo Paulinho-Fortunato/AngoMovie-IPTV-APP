@@ -2,16 +2,26 @@
 channels.py - M3U Channel Parser and Filter
 AngoMovie IPTV Backend
 """
+import os
 import re
 import time
 import logging
 from typing import List, Dict, Optional
+from urllib.parse import urlsplit
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# M3U Source URL
-M3U_URL = "http://nitidez.pro:80/get.php?username=Marcio&password=123456&type=m3u_plus"
+# Provide an authorized playlist URL via the server environment. Never commit it.
+M3U_URL_ENV = "ANGOMOVIE_M3U_URL"
+
+
+def _configured_m3u_url() -> str:
+    source = os.environ.get(M3U_URL_ENV, "").strip()
+    parsed = urlsplit(source)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError(f"{M3U_URL_ENV} must contain an authorized HTTP(S) playlist URL")
+    return source
 
 # Keywords to EXCLUDE (filter out non-live content)
 EXCLUDED_KEYWORDS = [
@@ -19,9 +29,6 @@ EXCLUDED_KEYWORDS = [
     "TEMPORADA", "DESENHO", "ANIME", "SERIES",
     "FILMES", "MOVIES", "NOVELA", "DOCUMENTARY",
 ]
-
-# Authorized domains for HTTP streams
-AUTHORIZED_DOMAINS = ["nitidez.pro"]
 
 # Cache
 _channels_cache: List[Dict] = []
@@ -99,25 +106,14 @@ async def fetch_channels(force_refresh: bool = False) -> List[Dict]:
         return _channels_cache
 
     try:
+        source_url = _configured_m3u_url()
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            # Try HTTPS first for security
-            try:
-                https_url = M3U_URL.replace("http://", "https://", 1)
-                response = await client.get(
-                    https_url,
-                    headers={"User-Agent": "AngoMovie/1.2.0 Backend"}
-                )
-                content = response.text
-            except Exception:
-                # Fall back to HTTP
-                response = await client.get(
-                    M3U_URL,
-                    headers={"User-Agent": "AngoMovie/1.2.0 Backend"}
-                )
-                content = response.text
-
-            if response.status_code != 200:
-                raise Exception(f"HTTP error: {response.status_code}")
+            response = await client.get(
+                source_url,
+                headers={"User-Agent": "AngoMovie/1.2.0 Backend"}
+            )
+            response.raise_for_status()
+            content = response.text
 
             channels = parse_m3u(content)
 
@@ -130,7 +126,8 @@ async def fetch_channels(force_refresh: bool = False) -> List[Dict]:
             return channels
 
     except Exception as e:
-        logger.error(f"Failed to fetch channels: {e}")
+        # Exception text from HTTP clients can contain a credential-bearing URL.
+        logger.error("Failed to fetch channels (%s)", type(e).__name__)
         if _channels_cache:
             logger.info("Returning stale cache due to fetch failure")
             return _channels_cache

@@ -12,16 +12,6 @@ import 'screens/splash_screen.dart';
 import 'services/channel_service.dart';
 import 'utils/app_theme.dart';
 
-/// CLASSE DE SEGURANÇA BATCH: Força o Flutter a aceitar conexões HTTP/HTTPS 
-/// de painéis IPTV com certificados SSL expirados, autoassinados ou inválidos.
-class MyHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
-  }
-}
-
 Future<void> _writeCrashLog(String error) async {
   try {
     final dir = await getApplicationDocumentsDirectory();
@@ -37,9 +27,6 @@ Future<void> _writeCrashLog(String error) async {
 }
 
 void main() async {
-  // ATIVAÇÃO DO BYPASS SSL
-  HttpOverrides.global = MyHttpOverrides();
-
   FlutterError.onError = (FlutterErrorDetails details) {
     final exception = details.exceptionAsString();
     final stackTrace = details.stack.toString();

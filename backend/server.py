@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         channels = await fetch_channels()
         logger.info(f"Pre-loaded {len(channels)} channels")
     except Exception as e:
-        logger.warning(f"Pre-load failed: {e}. Will retry on first request.")
+        logger.warning("Pre-load failed (%s). Will retry on first request.", type(e).__name__)
     yield
     logger.info("AngoMovie IPTV Backend shutting down...")
 
@@ -90,7 +90,7 @@ async def get_channels(
         return result
 
     except Exception as e:
-        logger.error(f"Error getting channels: {e}")
+        logger.error("Error getting channels (%s)", type(e).__name__)
         raise HTTPException(status_code=503, detail="Serviço temporariamente indisponível")
 
 
@@ -109,7 +109,7 @@ async def get_categories():
         ]
         return categories
     except Exception as e:
-        logger.error(f"Error getting categories: {e}")
+        logger.error("Error getting categories (%s)", type(e).__name__)
         raise HTTPException(status_code=503, detail="Erro ao carregar categorias")
 
 

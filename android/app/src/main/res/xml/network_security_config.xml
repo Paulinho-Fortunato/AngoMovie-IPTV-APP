@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Permite que o VLC Player faça downloads e carregue streams HTTP sem SSL -->
+    <!-- HTTP legado é necessário apenas para listas/streams IPTV autorizados que não suportem HTTPS. -->
+    <!-- Certificados TLS continuam sujeitos à validação normal do sistema. -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>
