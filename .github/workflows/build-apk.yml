@@ -32,11 +32,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Setup Flutter
+            - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Mantém o Flutter compatível com AGP 8.9.1 e Gradle 8.12 deste projeto.
+          flutter-version: '3.35.4'
           channel: 'stable'
-          cache: true # Ativa o cache nativo do SDK do Flutter
+          cache: true
 
       - name: Install dependencies
         run: flutter pub get
