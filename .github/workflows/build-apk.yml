@@ -2,9 +2,9 @@ name: Build AngoMovie APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -18,10 +18,9 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
-      # Caching do Gradle para acelerar as compilações futuras no GitHub
       - name: Gradle Cache
         uses: actions/cache@v3
         with:
@@ -32,12 +31,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-            - name: Setup Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # Mantém o Flutter compatível com AGP 8.9.1 e Gradle 8.12 deste projeto.
+          # Compatível com AGP 8.9.1 e Gradle 8.12 deste projeto.
           flutter-version: '3.35.4'
-          channel: 'stable'
+          channel: stable
           cache: true
 
       - name: Install dependencies
@@ -46,12 +45,9 @@ jobs:
       - name: Generate Hive Adapters
         run: dart run build_runner build --delete-conflicting-outputs
 
-      # COMPILAÇÃO INTELIGENTE: Divide o APK por arquiteturas, reduzindo o tamanho em até 70%!
       - name: Build APK
-        run: |
-          flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols
+        run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols
 
-      # Upload dos arquivos divididos (Muito menores e otimizados)
       - name: Upload APKs Otimizados
         uses: actions/upload-artifact@v4
         with:
